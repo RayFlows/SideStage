@@ -1,0 +1,12 @@
+# 本机开发状态、编译产物和试装记录不属于发布源码。
+.vs/
+bin/
+obj/
+*.user
+TestResults/
+artifacts/
+*.log
+*.pfx
+*.p12
+.env
+.env.local

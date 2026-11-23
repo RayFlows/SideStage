@@ -1,0 +1,12 @@
+<!-- 交互桌面回归验收程序。读取本进程测试窗口的实际合成像素，手动运行，避免在无桌面的 CI 中抢占焦点。 -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>../../src/SideStage.App/app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/SideStage.App/SideStage.App.csproj" />
+  </ItemGroup>
+</Project>

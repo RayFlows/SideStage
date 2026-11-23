@@ -1,0 +1,36 @@
+<!--
+  文件职责：定义 SideStage Windows 桌面应用、图标、字体与自包含安装入口。
+
+  界面通过独立的 SideStage.Windows 库调用 Windows RDP ActiveX：
+    - 不负责调度、业务流程或游戏适配。
+    - 启动时只读检查系统状态，不自动连接或改变系统设置。
+    - 断开预览和注销子会话提供为两个不同的显式操作。
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>SideStage</AssemblyName>
+    <RootNamespace>SideStage.App</RootNamespace>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>../../assets/branding/SideStage.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Product>SideStage</Product>
+    <AssemblyTitle>SideStage</AssemblyTitle>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="SideStage.UpdateRepository" Value="$(SideStageUpdateRepository)" />
+    <InternalsVisibleTo Include="SideStage.App.Tests" />
+    <PackageReference Include="Svg" Version="3.4.8" />
+    <PackageReference Include="System.Management" Version="10.0.11" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.11" />
+    <EmbeddedResource Include="Artwork/GiltInnerFrame.svg" LogicalName="SideStage.App.GiltInnerFrame.svg" />
+    <Content Include="../../LICENSE" Link="Licenses/SideStage-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Artwork/Fonts/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <EmbeddedResource Include="$(ApplicationIcon)" LogicalName="SideStage.App.SideStage.ico" />
+    <EmbeddedResource Include="Artwork/SettingsGear.png" LogicalName="SideStage.App.SettingsGear.png" />
+    <InternalsVisibleTo Include="SideStage.App.FrameCheck" />
+    <ProjectReference Include="../SideStage.Core/SideStage.Core.csproj" />
+    <ProjectReference Include="../SideStage.Windows/SideStage.Windows.csproj" />
+  </ItemGroup>
+</Project>

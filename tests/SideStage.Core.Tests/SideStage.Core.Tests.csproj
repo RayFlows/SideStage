@@ -1,0 +1,18 @@
+<!--
+  文件职责：SideStage.Core 的自动化测试项目定义。
+
+  测试边界：
+    - 单元测试只验证公开值对象和不依赖系统状态的核心规则。
+    - Windows 会话 API 的测试单独标记为集成测试，并且只读系统状态。
+    - 不创建或结束会话，不启动游戏，不修改任何系统设置。
+-->
+<Project Sdk="MSTest.Sdk/4.5.3">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/SideStage.Core/SideStage.Core.csproj" />
+    <ProjectReference Include="../../src/SideStage.Windows/SideStage.Windows.csproj" />
+  </ItemGroup>
+</Project>

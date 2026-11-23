@@ -1,0 +1,26 @@
+<!--
+  文件职责：SideStage.Windows 的项目定义。
+
+  该程序集提供可嵌入 WinForms 宿主的 Windows 图形会话能力：
+    - 承载系统自带的 MsRdpClient10 ActiveX 控件。
+    - 使用可配置逻辑分辨率和本地缩放方式建立本机子会话预览。
+    - 对外提供预览连接状态和显式断开操作。
+
+  该项目不实现任务调度、游戏适配器或业务界面。
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <UseWindowsForms>true</UseWindowsForms>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="SideStage.Core.Tests" />
+    <InternalsVisibleTo Include="SideStage.App.FrameCheck" />
+    <ProjectReference Include="../SideStage.Core/SideStage.Core.csproj" />
+    <!-- 开发构建随库复制代理；打包脚本单独发布同一架构的代理，避免混入开发版 apphost。 -->
+    <ProjectReference
+      Include="../SideStage.SessionAgent/SideStage.SessionAgent.csproj"
+      Condition="'$(SideStagePublishAgentSeparately)' != 'true'"
+      ReferenceOutputAssembly="true" />
+  </ItemGroup>
+</Project>

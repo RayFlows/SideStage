@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SideStage.App/SideStage.App.csproj" />
+    <Project Path="src/SideStage.Core/SideStage.Core.csproj" />
+    <Project Path="src/SideStage.SessionAgent/SideStage.SessionAgent.csproj" />
+    <Project Path="src/SideStage.Windows/SideStage.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/ChildSessionCheck/ChildSessionCheck.csproj" />
+    <Project Path="tools/SessionProbe/SessionProbe.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SideStage.App.Tests/SideStage.App.Tests.csproj" />
+    <Project Path="tests/SideStage.App.FrameCheck/SideStage.App.FrameCheck.csproj" />
+    <Project Path="tests/SideStage.Core.Tests/SideStage.Core.Tests.csproj" />
+  </Folder>
+</Solution>

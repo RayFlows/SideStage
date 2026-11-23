@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="624" height="654" viewBox="0 0 624 654"
+     role="img" aria-labelledby="frame-title frame-description">
+  <title id="frame-title">Gilt square-corner inner frame</title>
+  <desc id="frame-description">An open frame with square corner marks, stepped gilt rules, and matching diamond ornaments.</desc>
+  <defs>
+    <g id="corner-mark">
+      <path fill="#B69B70" fill-rule="evenodd"
+            d="M9 9H21V21H9Z M11 11H19V19H11Z"/>
+      <rect x="13" y="13" width="4" height="4" fill="#9E8058"/>
+      <path d="M22.5 99V39L39 22.5H117" fill="none" stroke="#D2BE9E"
+            stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M25.5 35.5L30.5 30.5L35.5 25.5L34.4 30.5L30.5 34.4Z" fill="#BCA17A"/>
+    </g>
+    <g id="end-rail" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M28 15H225L241 24H280L312 42L344 24H383L399 15H596"
+            stroke="#B69B70" stroke-width="2.4"/>
+      <path d="M124 22.5H208L225 32H277L312 51.5L347 32H399L416 22.5H500"
+            stroke="#D2BE9E" stroke-width="1.15"/>
+      <path d="M286.5 19H296M328 19H337.5" stroke="#BEA582" stroke-width="1.15"/>
+      <path d="M312 9.5L321.5 19L312 28.5L302.5 19Z"
+            stroke="#AE9064" stroke-width="1.4"/>
+      <path d="M312 15.25L315.75 19L312 22.75L308.25 19Z" fill="#9E8058"/>
+    </g>
+  </defs>
+  <g id="side-rails" fill="none" stroke="#B69B70" stroke-width="2.4" stroke-linecap="round">
+    <path d="M15 28V626M609 28V626"/>
+  </g>
+  <g id="horizontal-rails">
+    <use xlink:href="#end-rail"/>
+    <use xlink:href="#end-rail" transform="translate(0 654) scale(1 -1)"/>
+  </g>
+  <g id="corners">
+    <use xlink:href="#corner-mark"/>
+    <use xlink:href="#corner-mark" transform="translate(624 0) scale(-1 1)"/>
+    <use xlink:href="#corner-mark" transform="translate(0 654) scale(1 -1)"/>
+    <use xlink:href="#corner-mark" transform="translate(624 654) scale(-1 -1)"/>
+  </g>
+</svg>

@@ -1,0 +1,13 @@
+<!--
+  文件职责：SideStage.Core 的项目定义。
+
+  该项目是完全解耦的桌面分身基础库：
+    - 不引用游戏、脚本工具、调度器或生产配置。
+    - 不承担业务任务编排、账号切换和定时执行。
+    - 不依赖 WinForms/WPF；UI 只能通过公开接口使用本库。
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>

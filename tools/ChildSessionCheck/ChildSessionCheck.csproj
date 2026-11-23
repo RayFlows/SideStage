@@ -1,0 +1,10 @@
+<!-- 本机交互式验收入口。使用库的公开接口连接分身，保留已有用户会话。 -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/SideStage.Windows/SideStage.Windows.csproj" />
+  </ItemGroup>
+</Project>

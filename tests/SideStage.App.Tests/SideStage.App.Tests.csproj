@@ -1,0 +1,13 @@
+<!--
+  文件职责：验证桌面应用独有的发布渠道与更新协议。通过内存 HTTP 响应测试，不访问 GitHub 或生产注册表。
+  依赖边界：测试引用桌面宿主，不将联网能力引入会话库。
+-->
+<Project Sdk="MSTest.Sdk/4.5.3">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/SideStage.App/SideStage.App.csproj" />
+  </ItemGroup>
+</Project>

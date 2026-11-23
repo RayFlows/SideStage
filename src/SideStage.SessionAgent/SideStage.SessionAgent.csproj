@@ -1,0 +1,23 @@
+<!--
+  文件职责：定义 SideStage.SessionAgent 会话内启动代理的构建方式。
+
+  该进程是桌面分身库的内部部署组件：
+    - 由 Task Scheduler 投递到已经核验的目标子会话。
+    - 通过命名管道接收一次性启动请求。
+    - 在自身所在会话启动目标 GUI 进程并返回真实 PID。
+    - 未获得宿主确认时终止目标进程，避免启动结果漂移。
+
+  该项目不引用 UI、不实现任务调度、不保存账号信息，也不直接暴露给业务层。
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>SideStage.SessionAgent</AssemblyName>
+    <RootNamespace>SideStage.SessionAgent</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../SideStage.Core/SideStage.Core.csproj" />
+  </ItemGroup>
+</Project>
