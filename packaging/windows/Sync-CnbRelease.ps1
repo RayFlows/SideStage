@@ -5,7 +5,8 @@
     使用 PowerShell 7。先校验 GitHub 附件，再非强制推送单个标签，上传到草稿并发布。
     中断后可以重跑；已公开的版本只核对文件，不覆盖。写入令牌仅来自 CNB_TOKEN 环境变量。
 .PARAMETER CheckOnly
-    仅匿名下载并校验 GitHub 发行附件，不需要 CNB 账号，不更改任何远端或本地 Git 引用。
+    下载并校验 GitHub 公开附件，不需要 CNB 账号，不更改任何远端或本地 Git 引用。
+    本地默认匿名读取元数据；CI 可使用只读令牌查询，附件下载仍走用户的匿名入口。
 #>
 #requires -Version 7.4
 [CmdletBinding()]
@@ -37,7 +38,7 @@ function Invoke-CnbApi([string] $Method, [uri] $Uri, [hashtable] $Body, [switch]
 }
 
 function Assert-PublicCopy([string] $Root) {
-    <# 从用户实际使用的公开入口回读两个附件并逐字节摘要核对，未免登录开放的镜像不会通过。 #>
+    <# 从用户实际使用的公开入口回读每个附件并核对摘要，未免登录开放的镜像不会通过。 #>
     foreach ($file in $files) {
         $copy = Join-Path $stage 'public-copy'
         Invoke-WebRequest -Uri "$Root/download/$Tag/$file" -OutFile $copy -TimeoutSec 180
@@ -50,7 +51,13 @@ function Assert-PublicCopy([string] $Root) {
 if (!$CheckOnly -and (!$CnbRepository -or !$env:CNB_TOKEN)) { throw '发布需要明确的 CNB 仓库和 CNB_TOKEN；仅检查时使用 -CheckOnly。' }
 $null = New-Item -ItemType Directory -Path $stage
 try {
-    $gh = Invoke-RestMethod -Uri "https://api.github.com/repos/$GitHubRepository/releases/tags/$Tag" -Headers $headers -TimeoutSec 30
+    # GitHub 令牌仅用于固定 API 上的发行元数据，不能跟随重定向或传给附件 CDN、CNB。
+    $metadata = @{ Headers = $headers; TimeoutSec = 30; MaximumRedirection = 0 }
+    if ($env:SIDESTAGE_GITHUB_READ_TOKEN) {
+        $metadata.Authentication = 'Bearer'
+        $metadata.Token = ConvertTo-SecureString $env:SIDESTAGE_GITHUB_READ_TOKEN -AsPlainText -Force
+    }
+    $gh = Invoke-RestMethod -Uri "https://api.github.com/repos/$GitHubRepository/releases/tags/$Tag" @metadata
     if ($gh.tag_name -cne $Tag -or $gh.draft -ne $false -or ($version.Contains('-') -and !$gh.prerelease)) { throw 'GitHub 标签、草稿状态或测试渠道不符合发行约定。' }
     # 保留历史版本的双附件格式。新版本签名与正文一样从 GitHub 校验后原样镜像。
     if ($gh.assets.name -ccontains 'SHA256SUMS.sig') { $files += 'SHA256SUMS.sig' }

@@ -36,6 +36,8 @@ jobs:
       - name: 同步并验证免登录下载
         shell: pwsh
         env:
+          # 只给读取 GitHub 发行元数据的一次请求使用，避免共享 runner 的匿名 API 配额耗尽。
+          SIDESTAGE_GITHUB_READ_TOKEN: ${{ github.token }}
           # 官方仓库将令牌命名为 CNB；仍兼容按发布文档配置的 CNB_TOKEN。
           CNB_TOKEN: ${{ secrets.CNB_TOKEN || secrets.CNB }}
         run: ./packaging/windows/Sync-CnbRelease.ps1 -Tag $env:RELEASE_TAG -GitHubRepository $env:GITHUB_REPOSITORY -CnbRepository $env:CNB_REPOSITORY
