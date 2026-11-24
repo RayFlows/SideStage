@@ -1,0 +1,36 @@
+# 文件职责：把 GitHub 已公开的安装包同步到维护者配置的 CNB 镜像；不构建、不修改 GitHub 发行版。
+name: 同步 CNB 发行版
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已在 GitHub 发布的完整标签
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: cnb-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  mirror:
+    # 官方库不需要额外设置镜像地址；派生仓库必须显式填写自己的目的地。
+    if: github.repository == 'RayFlows/SideStage' || vars.CNB_REPOSITORY != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # 只运行默认分支上由维护者审核过的发布脚本，不执行旧标签或安装包内的代码。
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 同步并验证免登录下载
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          CNB_REPOSITORY: ${{ vars.CNB_REPOSITORY || 'fouramstage/SideStage' }}
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+        run: ./packaging/windows/Sync-CnbRelease.ps1 -Tag $env:RELEASE_TAG -GitHubRepository $env:GITHUB_REPOSITORY -CnbRepository $env:CNB_REPOSITORY
