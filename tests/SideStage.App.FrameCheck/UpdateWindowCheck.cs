@@ -37,10 +37,14 @@ internal static class UpdateWindowCheck
     {
         var offer = Sample() with { Notes = UpdateEntryTrial.Notes };
         var download = new TaskCompletionSource<VerifiedUpdate>();
-        int installed = 0, skipped = 0;
+        int installed = 0, skipped = 0, ready = 0;
+        IProgress<int>? reports = null;
         using var window = new ReleaseUpdateWindow(ReleaseVersion.Parse("0.1.0-beta.5")!, offer,
-            (source, _, _) => source.Domestic ? Task.FromException<VerifiedUpdate>(new IOException("测试源不可用")) : download.Task,
-            _ => { installed++; return Task.CompletedTask; }, () => skipped++, CancellationToken.None);
+            (source, progress, _) =>
+            {
+                reports = progress;
+                return source.Domestic ? Task.FromException<VerifiedUpdate>(new IOException("测试源不可用")) : download.Task;
+            }, _ => { installed++; return Task.CompletedTask; }, () => skipped++, CancellationToken.None, () => ready++);
         window.Show();
         Application.DoEvents();
         Control[] controls = Enumerate(window).ToArray();
@@ -63,20 +67,56 @@ internal static class UpdateWindowCheck
         Button later = buttons.Single(b => b.Text == "稍后");
         primary.PerformClick();
         WaitFor(() => primary.Text == "重新下载");
+        var failedReports = reports!;
         sources.Single(s => s.Text == "GitHub").PerformClick();
         if (sources.Count(s => s.Checked) != 1 || !sources.Single(s => s.Text == "GitHub").Checked)
             throw new InvalidOperationException("点击整个选项应互斥切换下载源。");
         primary.PerformClick();
+        var bar = controls.OfType<ProgressBar>().Single();
+        reports!.Report(-1);
+        WaitFor(() => bar.Visible && bar.Style == ProgressBarStyle.Marquee && controls.Any(c => c.Text == "正在下载安装包…"));
+        VerifyProgressColors(bar, marquee: true);
+        reports.Report(43);
+        WaitFor(() => bar.Value == 43 && bar.Style == ProgressBarStyle.Continuous);
+        VerifyProgressColors(bar, marquee: false);
+        failedReports.Report(94);
+        Application.DoEvents();
+        if (bar.Value != 43) throw new InvalidOperationException("失败线路的迟到进度覆盖了当前下载。");
+        using (var shot = new Bitmap(window.ClientSize.Width, window.ClientSize.Height))
+        {
+            window.Controls[0].DrawToBitmap(shot, new Rectangle(Point.Empty, shot.Size));
+            shot.Save(Path.ChangeExtension(image, "downloading.png"), ImageFormat.Png);
+        }
         later.PerformClick();
         if (window.Visible || installed != 0) throw new InvalidOperationException("后台下载未收起或意外启动了安装。");
         download.SetResult(new("fixture", "fixture"));
-        WaitFor(() => primary.Text == "重启并更新");
+        WaitFor(() => primary.Text == "安装并重启");
+        if (ready != 1 || window.Visible) throw new InvalidOperationException("后台就绪应通知设置入口一次，不应抢焦点。");
         window.Show();
-        if (installed != 0) throw new InvalidOperationException("完成下载不能自动安装。");
+        if (installed != 0 || bar.Visible) throw new InvalidOperationException("完成下载不能自动安装或继续显示下载进度。");
         primary.PerformClick();
         if (installed != 1 || skipped != 0) throw new InvalidOperationException("确认安装没有准确分派一次。");
-        Console.WriteLine("更新窗口验收通过：正文随宽度折行、大字号末行可滚达、小标题框外对齐、来源无描边、换源重试和后台下载。");
+        Console.WriteLine("更新窗口验收通过：正文布局、下载配色、不定进度、换源重试、后台就绪和明确确认安装。");
         return 0;
+    }
+
+    /// <summary>读取原生进度条实际绘制的中线像素。未知长度验证移动色块，已知长度核对填充比例。</summary>
+    private static void VerifyProgressColors(ProgressBar bar, bool marquee)
+    {
+        if (SystemInformation.HighContrast) return; // 辅助模式刻意沿用系统调色板。
+        using var image = new Bitmap(bar.Width, bar.Height);
+        int fill = PaperFieldSurface.Brass.ToArgb(), track = PaperFieldSurface.Hover.ToArgb(), first = -1;
+        WaitFor(() =>
+        {
+            bar.DrawToBitmap(image, bar.ClientRectangle);
+            int y = image.Height / 2, w = image.Width;
+            if (!marquee)
+                return image.GetPixel(w * 40 / 100, y).ToArgb() == fill && image.GetPixel(w * 46 / 100, y).ToArgb() == track;
+            int start = Enumerable.Range(0, w).FirstOrDefault(x => image.GetPixel(x, y).ToArgb() == fill, -1);
+            if (start < 0 || !Enumerable.Range(0, w).Any(x => image.GetPixel(x, y).ToArgb() == track)) return false;
+            if (first < 0) first = start;
+            return start != first;
+        });
     }
 
     /// <summary>在同一屏幕坐标系比较可见边界，确保两个小标题左对齐，正文框独占它们之间的空间。</summary>

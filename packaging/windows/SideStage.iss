@@ -2,6 +2,10 @@
 ; 安装范围：应用文件、开始菜单快捷方式和卸载记录。安装和卸载均不修改凭据、服务或会话。
 ; 构建入口：同目录 Build-Installer.ps1 提供版本、发布目录、输出目录和简体中文语言文件。
 
+#ifndef LegacyManifest
+  #define LegacyManifest SourcePath + "\LegacyFlatFiles.sha256"
+#endif
+
 [Setup]
 ; 发布名称可以调整，但安装标识不可更换，否则 Windows 将把升级识别为第二份安装。
 AppId={{28C18EA6-CBC7-4C56-AFC2-A5307EAD9573}
@@ -28,6 +32,8 @@ SetupIconFile=..\..\assets\branding\SideStage.ico
 UninstallDisplayIcon={app}\SideStage.exe
 WizardStyle=modern
 Compression=lzma2/normal
+; 两个独立入口包含大量相同的框架代码；加大固实字典，使相邻的两个入口能共享压缩历史。
+LZMADictionarySize=98304
 SolidCompression=yes
 ; 更新遇到已占用的文件时，不自动关闭用户正在使用的远程会话窗口。
 CloseApplications=no
@@ -41,19 +47,9 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [Files]
-; 库的 XML 文档留给开发者，安装版不需要。不要排除运行时或依赖自带的其他 XML 文件。
-Source: "{#PublishDir}\*"; DestDir: "{app}"; Excludes: "\SideStage.Core.xml,\SideStage.Windows.xml"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-[InstallDelete]
-; 仅在同一目录升级首个试装版时逐个清理已更名的发行文件，不删除目录或用户数据。
-Type: files; Name: "{app}\WinChildDesk.Core.dll"; Check: IsBetaOneUpgrade
-Type: files; Name: "{app}\WinChildDesk.Core.xml"; Check: IsBetaOneUpgrade
-Type: files; Name: "{app}\WinChildDesk.Windows.dll"; Check: IsBetaOneUpgrade
-Type: files; Name: "{app}\WinChildDesk.Windows.xml"; Check: IsBetaOneUpgrade
-Type: files; Name: "{app}\WinChildDesk.SessionAgent.exe"; Check: IsBetaOneUpgrade
-Type: files; Name: "{app}\WinChildDesk.SessionAgent.dll"; Check: IsBetaOneUpgrade
-Type: files; Name: "{app}\WinChildDesk.SessionAgent.deps.json"; Check: IsBetaOneUpgrade
-Type: files; Name: "{app}\WinChildDesk.SessionAgent.runtimeconfig.json"; Check: IsBetaOneUpgrade
+; 历史校验清单仅在升级时释放到安装器私有临时目录，不作为应用文件安装。
+Source: "{#LegacyManifest}"; Flags: dontcopy
+Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{userprograms}\SideStage"; Filename: "{app}\SideStage.exe"; WorkingDir: "{app}"
@@ -75,6 +71,8 @@ zhcn.KeepData=安装目录：%1%n%n保留已保存的登录凭据和活动日志
 en.KeepData=Installation folder: %1%n%nYour saved credentials and activity logs will be kept. To keep an active child session, disconnect in SideStage before closing its window.
 zhcn.UpgradeReady=准备更新 SideStage
 en.UpgradeReady=Ready to update SideStage
+zhcn.InstallingUpdate=正在安装 SideStage 更新
+en.InstallingUpdate=Installing the SideStage update
 zhcn.RepairReady=准备重新安装 SideStage
 en.RepairReady=Ready to reinstall SideStage
 zhcn.UpgradeAction=更新(&U)
@@ -171,11 +169,29 @@ begin
   if IsRepair then Result := CustomMessage(RepairKey) else Result := CustomMessage(UpgradeKey);
 end;
 
+{ 仅取消文件进度条自身的主题色，继续让 Inno 报告安装进度和处理辅助功能。 }
+function SetWindowTheme(Wnd: HWND; AppName, Classes: String): Integer;
+  external 'SetWindowTheme@uxtheme.dll stdcall';
+
+{ COLORREF 按 BGR 排列；颜色对应应用内的 PaperFieldSurface.Brass 与 Hover。 }
+procedure ApplyProgressColors;
+var
+  Gauge: HWND;
+begin
+  if HighContrastActive then exit;
+  Gauge := WizardForm.ProgressGauge.Handle;
+  { 显式传入指向零字符的字符串；空指针在此 API 中的含义是恢复系统主题。 }
+  SetWindowTheme(Gauge, #0, #0);
+  SendMessage(Gauge, $0409, 0, $003B5F7C); { PBM_SETBARCOLOR，黄铜 }
+  SendMessage(Gauge, $2001, 0, $00C3DAE8); { PBM_SETBKCOLOR，浅纸色 }
+end;
+
 { 直接复用原生向导的欢迎和确认页，不靠多一个弹窗来提示覆盖更新。 }
 procedure CurPageChanged(CurPageID: Integer);
 var
   Detail, Title: String;
 begin
+  if CurPageID = wpInstalling then ApplyProgressColors;
   if InstalledVersion = '' then exit;
   Title := ModeMessage('UpgradeTitle', 'RepairTitle');
   Detail := FmtMessage(ModeMessage('UpgradeDetail', 'RepairDetail'), [InstalledVersion, PackageVersion]);
@@ -193,7 +209,9 @@ begin
       WizardForm.NextButton.Caption := ModeMessage('UpgradeAction', 'RepairAction');
     end;
     wpInstalling: begin
-      WizardForm.PageNameLabel.Caption := Title;
+      if ExpandConstant('{param:SIDESTAGEUPDATE|0}') = '1' then
+        WizardForm.PageNameLabel.Caption := CustomMessage('InstallingUpdate')
+      else WizardForm.PageNameLabel.Caption := Title;
       WizardForm.PageDescriptionLabel.Caption := FmtMessage('%1  →  %2', [InstalledVersion, PackageVersion]);
     end;
     wpFinished: begin
@@ -233,47 +251,54 @@ begin
   end;
 end;
 
-{ 仅对首个试装版原目录执行精确的旧组件清理，快照不受安装中途更新注册表的影响。 }
-function IsBetaOneUpgrade: Boolean;
-begin
-  Result := (InstalledVersion = '0.1.0-beta.1') and (CompareText(RemoveBackslashUnlessRoot(InstalledDir),
-    RemoveBackslashUnlessRoot(ExpandConstant('{app}'))) = 0);
-end;
-
-{ 读取 Windows 文件属性；清理旧翻译时绝不沿用户放置的目录联接或符号链接访问其他位置。 }
+{ 读取 Windows 文件属性；不跟随用户在安装目录中放置的链接。 }
 function GetFileAttributesW(Path: String): Cardinal;
   external 'GetFileAttributesW@kernel32.dll stdcall';
 
-{ 新版不再分发十一种未使用的框架翻译。仅在旧版原目录成功升级或重装后，逐个移除
-  旧版确实分发的四种资源文件；RemoveDir 只能删除空目录，旁边的用户文件原样保留。 }
+{ 清单只含旧安装包顶层文件或一层语言目录的文件。先核对父目录、文件属性和摘要；
+  不遍历用户目录，不删除不匹配的同名文件，且只在确实删过文件后尝试移除空语言目录。 }
+procedure RemoveLegacyFile(const Root, Row: String);
+var
+  Parts: TArrayOfString;
+  Path, Parent, Hash: String;
+  I: Integer;
+begin
+  Parts := StringSplit(Row, ['|'], stAll);
+  if GetArrayLength(Parts) < 2 then exit;
+  Path := AddBackslash(Root) + Parts[0];
+  Parent := ExtractFileDir(Path);
+  if (Parent <> Root) and (ExtractFileDir(Parent) <> Root) then exit;
+  if ((GetFileAttributesW(Parent) and $400) <> 0) or not FileExists(Path) or
+     ((GetFileAttributesW(Path) and $400) <> 0) then exit;
+  try
+    Hash := GetSHA256OfFile(Path);
+    for I := 1 to GetArrayLength(Parts) - 1 do
+      if CompareText(Hash, Parts[I]) = 0 then begin
+        if DeleteFile(Path) then begin
+          if Parent <> Root then RemoveDir(Parent);
+        end else Log('保留无法删除的旧文件：' + Path);
+        exit;
+      end;
+    Log('保留内容已变化的旧文件：' + Path);
+  except
+    Log('保留无法校验的旧文件：' + Path);
+  end;
+end;
+
+{ 等新文件成功写入才退役旧运行时，失败或取消的升级不损坏原版。只处理已登记的原安装目录。 }
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Root, Dir, Path: String;
-  Cultures, Names: TArrayOfString;
-  I, J: Integer;
-  FoundResource: Boolean;
+  Root: String;
+  Rows: TArrayOfString;
+  I: Integer;
 begin
   if (CurStep <> ssPostInstall) or (InstalledDir = '') then exit;
-  if (InstalledVersion <> '0.1.0-beta.1') and (InstalledVersion <> '0.1.0-beta.2') and
-     (InstalledVersion <> '0.1.0-beta.3') and (InstalledVersion <> '0.1.0-beta.4') then exit;
+  if Pos('|' + InstalledVersion + '|',
+    '|0.1.0-beta.1|0.1.0-beta.2|0.1.0-beta.3|0.1.0-beta.4|0.1.0-beta.5|0.1.0-beta.6|') = 0 then exit;
   Root := RemoveBackslashUnlessRoot(ExpandConstant('{app}'));
   if (CompareText(RemoveBackslashUnlessRoot(InstalledDir), Root) <> 0) or
      ((GetFileAttributesW(Root) and $400) <> 0) then exit;
-  Cultures := StringSplit('cs,de,es,fr,it,ja,ko,pl,pt-BR,ru,tr', [','], stAll);
-  Names := StringSplit('Microsoft.VisualBasic.Forms,System.Windows.Forms.Design,System.Windows.Forms.Primitives,System.Windows.Forms', [','], stAll);
-  for I := 0 to GetArrayLength(Cultures) - 1 do begin
-    Dir := AddBackslash(Root) + Cultures[I];
-    if DirExists(Dir) and ((GetFileAttributesW(Dir) and $400) = 0) then begin
-      FoundResource := False;
-      for J := 0 to GetArrayLength(Names) - 1 do begin
-        Path := AddBackslash(Dir) + Names[J] + '.resources.dll';
-        if FileExists(Path) and ((GetFileAttributesW(Path) and $400) = 0) then begin
-          FoundResource := True;
-          if not DeleteFile(Path) then Log('保留无法删除的旧翻译：' + Path);
-        end;
-      end;
-      if FoundResource then
-        if not RemoveDir(Dir) then Log('保留非空或不可删除的旧语言目录：' + Dir);
-    end;
-  end;
+  ExtractTemporaryFile('LegacyFlatFiles.sha256');
+  if LoadStringsFromFile(ExpandConstant('{tmp}\LegacyFlatFiles.sha256'), Rows) then
+    for I := 0 to GetArrayLength(Rows) - 1 do RemoveLegacyFile(Root, Rows[I]);
 end;

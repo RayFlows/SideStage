@@ -18,9 +18,10 @@ $null = New-Item -ItemType Directory -Path $app
 
 # 体验宿主使用模拟更新列表，不连接真实 RDP，也不需要把多种发布模式的代理复制到同一位置。
 & dotnet publish (Join-Path $root 'tests/SideStage.App.FrameCheck') -c Release -r win-x64 --self-contained true `
+    '-p:PublishSingleFile=true' '-p:IncludeNativeLibrariesForSelfExtract=true' '-p:EnableCompressionInSingleFile=true' '-p:PublishDocumentationFiles=false' `
     '-p:SideStagePublishAgentSeparately=true' '-p:DebugType=None' '-p:DebugSymbols=false' -o $app
 if ($LASTEXITCODE) { throw "体验宿主发布失败，保留现场：$stage" }
-& (Join-Path $PSScriptRoot 'Test-PublishLayout.ps1') -Directory $app
+& (Join-Path $PSScriptRoot 'Test-PublishLayout.ps1') -Directory $app -Layout UpdateTrial
 foreach ($entry in @(@('01-Manual.cmd','manual'), @('02-Auto.cmd','auto'))) {
     $command = '@start "" "%~dp0app\SideStage.App.FrameCheck.exe" --update-entries ' + $entry[1]
     [IO.File]::WriteAllText((Join-Path $package $entry[0]), $command + "`r`n", [Text.Encoding]::ASCII)

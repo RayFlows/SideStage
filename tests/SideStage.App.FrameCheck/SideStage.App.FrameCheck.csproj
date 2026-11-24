@@ -9,4 +9,10 @@
   <ItemGroup>
     <ProjectReference Include="../../src/SideStage.App/SideStage.App.csproj" />
   </ItemGroup>
+  <!-- 体验 ZIP 以 FrameCheck 为唯一入口；保留程序集引用，不分发被引用主程序的启动壳和配置。 -->
+  <Target Name="OmitReferencedAppHost" AfterTargets="ComputeResolvedFilesToPublishList" Condition="'$(PublishSingleFile)' == 'true'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.RelativePath)' == 'SideStage.exe' Or '%(ResolvedFileToPublish.RelativePath)' == 'SideStage.runtimeconfig.json' Or '%(ResolvedFileToPublish.RelativePath)' == 'SideStage.deps.json'" />
+    </ItemGroup>
+  </Target>
 </Project>

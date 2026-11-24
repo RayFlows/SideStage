@@ -8,7 +8,7 @@ using System.Drawing.Drawing2D;
 
 namespace SideStage.App;
 
-internal sealed class PaperCommandButton : Button
+internal class PaperCommandButton : Button
 {
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Color FaceColor { get; set; } = PaperFieldSurface.Paper;

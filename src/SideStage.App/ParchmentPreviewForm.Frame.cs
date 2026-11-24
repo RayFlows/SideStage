@@ -107,7 +107,7 @@ internal sealed partial class ParchmentPreviewForm
     /// <summary>使用系统窗口符号并提供中文辅助名称，使标题栏按钮支持鼠标及辅助技术调用。</summary>
     private Button CreateCaptionButton(string name, string glyph, EventHandler action)
     {
-        PaperCommandButton button = new()
+        CaptionButton button = new()
         {
             AccessibleName = name, Text = glyph, Font = _captionSymbols,
             FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false,
@@ -117,6 +117,27 @@ internal sealed partial class ParchmentPreviewForm
         };
         button.Click += action;
         return button;
+    }
+
+    /// <summary>窗口命令共用纸面按钮的外观，但鼠标操作应像系统标题栏一样保留内容区焦点。</summary>
+    private sealed class CaptionButton : PaperCommandButton
+    {
+        /// <summary>仅在处理左键按下时跳过 WinForms 的自动聚焦；松开、辅助技术调用和程序触发仍走标准按钮流程。</summary>
+        protected override void WndProc(ref Message message)
+        {
+            const int leftButtonDown = 0x0201, leftButtonDoubleClick = 0x0203;
+            if (message.Msg is not (leftButtonDown or leftButtonDoubleClick))
+            {
+                base.WndProc(ref message);
+                return;
+            }
+
+            // TabStop 只管 Tab 导航。鼠标若把标题键变成活动控件，还原窗口后它会继续显示为默认按钮。
+            bool selectable = GetStyle(ControlStyles.Selectable);
+            SetStyle(ControlStyles.Selectable, false);
+            try { base.WndProc(ref message); }
+            finally { SetStyle(ControlStyles.Selectable, selectable); }
+        }
     }
 
     /// <summary>在尺寸、缩放或最大化状态改变时更新真实窗形，同时给标题按钮和 RDP 预留内圆弧空间。</summary>

@@ -3,7 +3,7 @@
  * 测量方式：对自有窗体切换焦点、改变背板颜色，通过屏幕像素检查实际显示效果。
  * 使用方式：dotnet run --project tests/SideStage.App.FrameCheck；可附带一个路径输出验收截图，
  *   --horizontal 对比左右拖边和设置抽屉，--surface 对比上下拖边，--vertical 检查黑块和鼠标命中，
- *   --resize 测量布局耗时并检查右缘与纸面的相对位置。
+ *   --resize 测量布局耗时并检查右缘与纸面的相对位置，--caption-buttons 检查窗口状态切换后的标题键底色。
  */
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -20,7 +20,8 @@ internal static class Program
     private static int Main(string[] args)
     {
         // 自动验收必须让窗口回调异常直接导致进程失败，不能由系统的「继续」对话框掩盖。
-        if (args is ["--check-update-entries"])
+        bool captionButtons = args is ["--caption-buttons"];
+        if (captionButtons || args is ["--check-update-entries"])
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
@@ -49,9 +50,9 @@ internal static class Program
         bool dpiCycle = args.FirstOrDefault() == "--dpi-cycle";
         bool homeLayout = dpiCycle || args.FirstOrDefault() == "--home-layout";
         bool drawerLayout = args.FirstOrDefault() == "--drawer-layout";
-        var firstUse = homeLayout || drawerLayout || args is ["--first-use", _] or ["--settings"] or ["--settings", _] ? new FirstUseSessions() : null;
+        var firstUse = homeLayout || drawerLayout || captionButtons || args is ["--first-use", _] or ["--settings"] or ["--settings", _] ? new FirstUseSessions() : null;
         using ParchmentPreviewForm window = new(vault, logDirectory, folder => { openedFolder = folder; folderOpenCount++; },
-            pollSessions: !homeLayout && !drawerLayout && args is not ["--connected-resize"], sessionInspector: firstUse,
+            pollSessions: !homeLayout && !drawerLayout && !captionButtons && args is not ["--connected-resize"], sessionInspector: firstUse,
             enableChildSessions: firstUse is null ? null : firstUse.EnableAsync) { StartPosition = FormStartPosition.Manual, TopMost = true,
             Bounds = initial };
         back.Show();
@@ -59,6 +60,7 @@ internal static class Program
         window.Show(back);
         SetForegroundWindow(window.Handle);
         Settle();
+        if (captionButtons) return SettingsInteractionCheck.CheckCaptionButtons(window);
         if (dpiCycle)
         {
             HomeDpiCycleCheck.Run(window, args.ElementAtOrDefault(1));

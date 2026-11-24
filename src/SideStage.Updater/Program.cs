@@ -39,7 +39,8 @@ internal static class Program
             if (!parent.WaitForExit(30000)) throw new IOException("原窗口没有退出，未开始安装。");
             string log = Path.Combine(directory, "install.log");
             var start = new ProcessStartInfo(installer) { UseShellExecute = false, WorkingDirectory = directory };
-            foreach (string arg in new[] { "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCLOSEAPPLICATIONS",
+            // 已在主窗口确认安装：跳过向导选择页，只显示真实的文件安装进度，不再弹出第二次确认。
+            foreach (string arg in new[] { "/SILENT", "/NOCANCEL", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCLOSEAPPLICATIONS",
                 "/SP-", "/SIDESTAGEUPDATE=1", $"/DIR={Path.GetDirectoryName(app)}", $"/LOG={log}" }) start.ArgumentList.Add(arg);
             using var setup = Process.Start(start) ?? throw new IOException("无法启动安装器。");
             setup.WaitForExit();

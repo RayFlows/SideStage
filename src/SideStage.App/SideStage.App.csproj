@@ -28,7 +28,8 @@
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.11" />
     <EmbeddedResource Include="Artwork/GiltInnerFrame.svg" LogicalName="SideStage.App.GiltInnerFrame.svg" />
     <Content Include="../../LICENSE" Link="Licenses/SideStage-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="Artwork/Fonts/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- GDI 和 GDI+ 通过安装目录中的真实路径加载字体，不能让单文件打包器把 TTF 当作待解压的二进制。 -->
+    <Content Include="Artwork/Fonts/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <EmbeddedResource Include="$(ApplicationIcon)" LogicalName="SideStage.App.SideStage.ico" />
     <EmbeddedResource Include="Artwork/SettingsGear.png" LogicalName="SideStage.App.SettingsGear.png" />
     <EmbeddedResource Include="Artwork/UpdateSources/*.svg" LogicalName="SideStage.App.UpdateSources.%(Filename)%(Extension)" />

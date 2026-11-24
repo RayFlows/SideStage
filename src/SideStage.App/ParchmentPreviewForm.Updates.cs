@@ -157,7 +157,13 @@ internal sealed partial class ParchmentPreviewForm
                 try { using var key = Registry.CurrentUser.CreateSubKey(_updatePreferenceKey); key.SetValue("SkippedUpdate", offer.Version.Text); }
                 catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or SecurityException)
                 { SetUpdateStatus("本次已跳过，未能保存到下次启动。"); }
-            }, _updateLifetime.Token);
+            }, _updateLifetime.Token, () =>
+            {
+                // 后台下载完成只更新入口；不抢焦点，也不借通知直接开始安装。
+                if (_checkUpdates != null) _checkUpdates.Text = "查看待安装更新";
+                if (_homeSettings != null) _homeSettings.Text = "设置 · 待安装";
+                SetUpdateStatus($"{offer.Version.Text} 已下载，等待安装。");
+            });
         if (!_updateWindow.Visible)
         {
             _updateWindow.StartPosition = FormStartPosition.Manual;

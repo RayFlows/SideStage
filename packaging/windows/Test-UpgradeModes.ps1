@@ -32,8 +32,13 @@ if (-not $source.Contains("AppId={{$id}") -or $source.Contains($realId) -or $sou
 $recipe = Join-Path $run 'fixture.iss'
 [IO.File]::WriteAllText($recipe, $source, [Text.UTF8Encoding]::new($true))
 $language = Join-Path $root 'artifacts/tooling/ChineseSimplified-6.5.4.isl'
+# 合成负载用自己的校验清单；正式发行文件的真实摘要另由 Test-Installer 的跨版验收覆盖。
+$legacyManifest = Join-Path $run 'LegacyFlatFiles.sha256'
+$digest = (Get-FileHash -LiteralPath $icon).Hash
+$rows = foreach ($culture in 'cs', 'de', 'fr', 'zh-Hans') { "$culture\System.Windows.Forms.resources.dll|$digest" }
+[IO.File]::WriteAllLines($legacyManifest, [string[]]$rows)
 foreach ($version in '0.1.0-beta.2','0.1.0-beta.10') {
-    & $compiler '/Q' "/DAppVersion=$version" '/DFileVersion=0.1.0.0' "/DPublishDir=$payload" "/DOutputDirPath=$run" "/DChineseMessages=$language" $recipe
+    & $compiler '/Q' "/DAppVersion=$version" '/DFileVersion=0.1.0.0' "/DPublishDir=$payload" "/DOutputDirPath=$run" "/DChineseMessages=$language" "/DLegacyManifest=$legacyManifest" $recipe
     if ($LASTEXITCODE -ne 0) { throw '隔离安装包编译失败。' }
 }
 
@@ -55,12 +60,13 @@ function Test-Mode([string] $Name, [string] $Version, [string] $Mode, [string] $
 
 try {
     Test-Mode '首次安装' '0.1.0-beta.2' 'install' '0.1.0-beta.2' $true
-    # 模拟旧版留下的 WinForms 翻译。仅程序原有文件可被清理，用户文件和中文包必须保留。
+    # 原样文件应清除；同名但已修改的文件、用户文件、空目录和指向目录外的联接必须保留。
     foreach ($name in 'cs','de','zh-Hans') {
         $null = New-Item -ItemType Directory -Path (Join-Path $dir $name)
         Copy-Item -LiteralPath $icon -Destination (Join-Path $dir "$name/System.Windows.Forms.resources.dll")
     }
     Copy-Item -LiteralPath $icon -Destination (Join-Path $dir 'de/keep.txt')
+    [IO.File]::WriteAllText("$dir/zh-Hans/System.Windows.Forms.resources.dll", 'modified by user')
     $null = New-Item -ItemType Directory -Path "$dir/es","$run/user-files"
     Copy-Item -LiteralPath $icon -Destination "$run/user-files/System.Windows.Forms.resources.dll"
     $null = New-Item -ItemType Junction -Path "$dir/fr" -Target "$run/user-files"
@@ -68,6 +74,7 @@ try {
     $lock = [IO.File]::OpenRead((Join-Path $dir 'SideStage.exe'))
     try { Test-Mode '文件占用' '0.1.0-beta.10' 'update' '0.1.0-beta.2' $false }
     finally { $lock.Dispose() }
+    if (!(Test-Path -LiteralPath "$dir/cs/System.Windows.Forms.resources.dll")) { throw '升级被阻止时不应提前清理旧版。' }
     Test-Mode '向前升级' '0.1.0-beta.10' 'update' '0.1.0-beta.10' $true
     if ((Test-Path -LiteralPath "$dir/cs") -or (Test-Path -LiteralPath "$dir/de/System.Windows.Forms.resources.dll") -or
         !(Test-Path -LiteralPath "$dir/de/keep.txt") -or !(Test-Path -LiteralPath "$dir/zh-Hans/System.Windows.Forms.resources.dll") -or

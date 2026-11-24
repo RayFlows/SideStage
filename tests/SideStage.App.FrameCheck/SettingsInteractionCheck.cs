@@ -1,6 +1,6 @@
 /*
  * 文件名称：SettingsInteractionCheck.cs
- * 文件职责：验收设置抽屉、日志完整性、齿轮交互与关闭确认。
+ * 文件职责：验收设置抽屉、日志完整性、齿轮交互、标题栏按钮与关闭确认。
  * 测试边界：用模拟连接状态驱动界面，注销操作由内存委托记录；不接触用户凭据或真实会话。
  */
 using System.Runtime.InteropServices;
@@ -429,6 +429,76 @@ internal static class SettingsInteractionCheck
                 $"放大后按实际内容分配滑块位置（内容 {viewport.Controls[0].Height}，视口 {viewport.ClientSize.Height}）");
         }
         finally { window.Size = original; }
+    }
+
+    /// <summary>在设置侧栏展开时点击真实标题栏按钮，检查还原后不保留高亮，重新悬停仍有反馈。</summary>
+    internal static int CheckCaptionButtons(Form window)
+    {
+        Button minimize = window.Controls.OfType<Button>().Single(b => b.AccessibleName == "最小化");
+        Button maximize = window.Controls.OfType<Button>().Single(b => b.AccessibleName == "最大化");
+        Point original = Cursor.Position;
+        Point away = window.PointToScreen(new Point(window.ClientSize.Width / 2, window.ClientSize.Height / 2));
+        try
+        {
+            Descendants(window).OfType<Button>().Single(b => b.Text == "高级设置").PerformClick();
+            var content = Descendants(window).OfType<Button>().Single(b => b.Text == "登录凭据");
+            Require(content.Focus(), "先将键盘焦点放在设置侧栏");
+            HoverCaption(minimize);
+            Click(minimize);
+            Wait(400);
+            Require(window.WindowState == FormWindowState.Minimized, "点击最小化进入任务栏");
+            Cursor.Position = away;
+            // 发送系统还原命令，不点击内容区，否则会意外改变焦点而掩盖残留状态。
+            SendMessage(window.Handle, 0x0112, 0xF120, 0); // WM_SYSCOMMAND / SC_RESTORE
+            window.Activate();
+            Wait(400);
+            Require(window.WindowState == FormWindowState.Normal, "从最小化还原到普通窗口");
+            bool passed = CheckCaptionFace(minimize, false, "最小化后还原");
+            Require(content.Focused, "从任务栏还原后保留设置项焦点");
+
+            foreach (FormWindowState target in new[] { FormWindowState.Maximized, FormWindowState.Normal })
+            {
+                HoverCaption(maximize);
+                Click(maximize);
+                Wait(400);
+                Require(window.WindowState == target, $"点击标题键切换到 {target}");
+                // 通常窗口换位已使按钮离开指针；小屏上两种窗口宽度可能相同，此时显式移开。
+                if (maximize.RectangleToScreen(maximize.ClientRectangle).Contains(Cursor.Position))
+                {
+                    Cursor.Position = away;
+                    Wait(100);
+                }
+                passed &= CheckCaptionFace(maximize, false, target == FormWindowState.Maximized ? "最大化后" : "还原大小后");
+                Require(content.Focused, "切换窗口大小不抢走设置项焦点");
+            }
+            HoverCaption(window.Controls.OfType<Button>().Single(b => b.AccessibleName == "关闭"));
+            maximize.AccessibilityObject.DoDefaultAction();
+            Require(window.WindowState == FormWindowState.Maximized, "辅助技术仍可调用窗口命令");
+            maximize.PerformClick();
+            Require(window.WindowState == FormWindowState.Normal, "程序仍可调用还原命令");
+            return passed ? 0 : 1;
+        }
+        finally { Cursor.Position = original; }
+    }
+
+    /// <summary>移入按钮并确认真实悬停色；防止通过完全禁用高亮使回归用例误通过。</summary>
+    private static void HoverCaption(Button button)
+    {
+        Cursor.Position = button.PointToScreen(new Point(button.Width / 2, button.Height / 2));
+        Wait(100);
+        Require(CheckCaptionFace(button, true, $"{button.AccessibleName} 悬停"), "标题键显示真实悬停反馈");
+    }
+
+    /// <summary>在按钮上缘内侧避开字形和圆角取样，并确认采样点属于本次验收的窗口。</summary>
+    private static bool CheckCaptionFace(Button button, bool hovered, string stage)
+    {
+        Point sample = button.PointToScreen(new Point(button.Width / 2, button.LogicalToDeviceUnits(4)));
+        Require(WindowFromPoint(sample) == button.Handle, "标题键采样点未被遮挡");
+        using Bitmap pixel = CaptureArea(new Rectangle(sample, new Size(1, 1)));
+        Color actual = pixel.GetPixel(0, 0);
+        Color expected = hovered ? button.FlatAppearance.MouseOverBackColor : button.BackColor;
+        Console.WriteLine($"{stage}：实际 {actual.Name}，预期 {expected.Name}，按钮有焦点={button.Focused}");
+        return actual.ToArgb() == expected.ToArgb();
     }
 
     /// <summary>在首页浅色按钮上比较鼠标进出前后的实色像素，避开文字、光标和圆角。</summary>

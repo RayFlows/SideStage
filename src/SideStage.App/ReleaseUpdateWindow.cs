@@ -13,10 +13,12 @@ internal sealed class ReleaseUpdateWindow : Form
     private readonly ReleaseOffer _offer;
     private readonly Func<UpdateSource, IProgress<int>, CancellationToken, Task<VerifiedUpdate>> _download;
     private readonly Func<VerifiedUpdate, Task> _install;
+    private readonly Action? _readyToInstall;
     private readonly CancellationToken _lifetime;
     private readonly FlowLayoutPanel _sources = new() { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true,
         Margin = new Padding(2, 4, 2, 0) };
-    private readonly ProgressBar _progress = new() { Dock = DockStyle.Fill, Height = 7, Visible = false };
+    private readonly ReleaseProgressBar _progress = new() { Dock = DockStyle.Fill, Height = 8, Visible = false,
+        AccessibleName = "更新下载进度" };
     private readonly Label _status = new() { AutoSize = true, Dock = DockStyle.Fill, UseMnemonic = false };
     private readonly PaperCommandButton _primary = Command("下载更新", true), _later = Command("稍后"),
         _skip = Command("跳过此版本"), _cancel = Command("取消下载");
@@ -29,9 +31,9 @@ internal sealed class ReleaseUpdateWindow : Form
     /// <summary>仅渲染已解析的纯文本。下载、交接及跳过行为由主窗口注入，可离线验收，不接触真实会话。</summary>
     internal ReleaseUpdateWindow(ReleaseVersion current, ReleaseOffer offer,
         Func<UpdateSource, IProgress<int>, CancellationToken, Task<VerifiedUpdate>> download,
-        Func<VerifiedUpdate, Task> install, Action skip, CancellationToken lifetime)
+        Func<VerifiedUpdate, Task> install, Action skip, CancellationToken lifetime, Action? readyToInstall = null)
     {
-        (_offer, _download, _install, _lifetime) = (offer, download, install, lifetime);
+        (_offer, _download, _install, _lifetime, _readyToInstall) = (offer, download, install, lifetime, readyToInstall);
         Program.ApplyIdentity(this);
         Text = "SideStage 更新";
         AutoScaleDimensions = new SizeF(96, 96);
@@ -117,30 +119,34 @@ internal sealed class ReleaseUpdateWindow : Form
             {
                 _installing = true;
                 _later.Enabled = _primary.Enabled = false;
-                _status.Text = "正在准备独立更新器…";
+                _status.Text = "正在准备安装，完成后将重新打开 SideStage…";
                 await _install(_verified);
-                if (!IsDisposed && !_lifetime.IsCancellationRequested) _status.Text = "安装包已验证，稍后仍可重启更新。";
+                if (!IsDisposed && !_lifetime.IsCancellationRequested) _status.Text = "尚未安装，可稍后继续。";
                 return;
             }
-            _transfer = CancellationTokenSource.CreateLinkedTokenSource(_lifetime);
+            var transfer = _transfer = CancellationTokenSource.CreateLinkedTokenSource(_lifetime);
             _primary.Enabled = _sources.Enabled = false;
+            _primary.Text = "下载中";
             _cancel.Visible = _progress.Visible = true;
             _progress.Value = 0;
             _skip.Visible = false;
             _progress.Style = ProgressBarStyle.Marquee;
-            _status.Text = "正在验证发布签名并下载…";
+            _status.Text = "正在校验更新包信息…";
             _later.Text = "后台下载";
             var source = _sources.Controls.OfType<ReleaseSourceOption>().Single(r => r.Checked).Source;
             var progress = new Progress<int>(value =>
             {
-                if (IsDisposed || _transfer == null) return;
+                // 取消或换源后，上一轮排队的进度不能覆盖新下载或「等待安装」状态。
+                if (IsDisposed || _transfer != transfer) return;
                 _progress.Style = value < 0 ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
-                if (value >= 0) { _progress.Value = value; _status.Text = $"正在下载：{value}%"; }
+                if (value >= 0) _progress.Value = value;
+                _status.Text = value < 0 ? "正在下载安装包…" : $"正在下载安装包：{value}%";
             });
             _verified = await _download(source, progress, _transfer.Token);
             if (_lifetime.IsCancellationRequested) return;
-            _status.Text = "安装包已验证。可以现在重启，也可以稍后回来安装。";
-            _primary.Text = "重启并更新";
+            _status.Text = "下载完成，安装包已校验。安装后将重新打开 SideStage。";
+            _primary.Text = "安装并重启";
+            _readyToInstall?.Invoke();
         }
         catch (Exception ex) when (ex is OperationCanceledException or IOException or InvalidDataException or HttpRequestException or
             CryptographicException or FormatException or UnauthorizedAccessException or InvalidOperationException or

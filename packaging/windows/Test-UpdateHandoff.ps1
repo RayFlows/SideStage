@@ -21,7 +21,7 @@ $null = New-Item -ItemType Directory -Path $payload
 if ($LASTEXITCODE) { throw '验收宿主编译失败。' }
 $worker = Join-Path $run 'worker'
 & dotnet publish (Join-Path $root 'src/SideStage.Updater') -c Release -r win-x64 --self-contained true `
-    -p:PublishSingleFile=true -p:PublishTrimmed=true -p:IncludeNativeLibrariesForSelfExtract=true -o $worker
+    -p:PublishSingleFile=true -p:PublishTrimmed=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o $worker
 if ($LASTEXITCODE) { throw '更新器编译失败。' }
 Copy-Item -LiteralPath "$worker/SideStage.Updater.exe" -Destination $payload
 $icon = Join-Path $root 'assets/branding/SideStage.ico'
@@ -30,11 +30,36 @@ $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'SideStage.iss')).Repl
     Replace('{userprograms}\SideStage', '{app}\links\start').Replace('{userdesktop}\SideStage', '{app}\links\desktop').
     Replace('{localappdata}\Programs\SideStage', $dir).Replace('..\..\assets\branding\SideStage.ico', $icon)
 if (!$source.Contains("AppId={{$id}") -or $source -match '\{user(desktop|programs)\}|28C18EA6') { throw '验收配方隔离失败。' }
+# 仅在隔离安装包的真实文件进度回调中采样。只检查最终版本会漏掉「确实安装了，但窗口完全不可见」的回归。
+$source += @'
+
+[Code]
+var
+  ObservedProgress: Boolean;
+
+{ 核对进度条及其父窗口的实际可见性，不把已创建但仍隐藏的向导当成安装反馈。 }
+function IsWindowVisible(Wnd: HWND): Boolean;
+  external 'IsWindowVisible@user32.dll stdcall';
+
+{ 由安装器报告实质进度后，读回本轮窗口的标题和两种原生颜色；高对比度沿用用户配色。 }
+procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
+var
+  Gauge: HWND;
+begin
+  if ObservedProgress or (CurProgress <= 0) or (CurProgress >= MaxProgress) then exit;
+  Gauge := WizardForm.ProgressGauge.Handle;
+  if not IsWindowVisible(Gauge) or (WizardForm.PageNameLabel.Caption <> CustomMessage('InstallingUpdate')) then exit;
+  if not HighContrastActive and ((SendMessage(Gauge, $040F, 0, 0) <> $003B5F7C) or
+    (SendMessage(Gauge, $040E, 0, 0) <> $00C3DAE8)) then exit;
+  ObservedProgress := True;
+  Log('SideStage fixture: visible install progress');
+end;
+'@
 [IO.File]::WriteAllText($recipe, $source, [Text.UTF8Encoding]::new($true))
 foreach ($v in '1.0.0','1.1.0') {
     [IO.File]::WriteAllText("$payload/fixture-only.txt", $v)
     & $compiler /Q "/DAppVersion=$v" "/DFileVersion=$v.0" "/DPublishDir=$payload" "/DOutputDirPath=$run" `
-        "/DChineseMessages=$root/artifacts/tooling/ChineseSimplified-6.5.4.isl" $recipe
+        "/DChineseMessages=$root/artifacts/tooling/ChineseSimplified-6.5.4.isl" "/DLegacyManifest=$PSScriptRoot/LegacyFlatFiles.sha256" $recipe
     if ($LASTEXITCODE) { throw '验收安装包编译失败。' }
 }
 try {
@@ -49,6 +74,9 @@ try {
         if ((Get-Content -Raw -LiteralPath "$dir/fixture-only.txt") -ne $expected -or
             (Get-ItemProperty -LiteralPath $key).DisplayVersion -ne $expected -or
             ((Test-Path -LiteralPath "$dir/restarted.txt") -ne ($action -eq 'install'))) { throw "版本或重启状态错误：$action" }
+        if ($action -eq 'install' -and !(Select-String -LiteralPath "$run/install.log" -SimpleMatch -Quiet 'SideStage fixture: visible install progress')) {
+            throw '实际写入期间没有观察到带正确标题和配色的可见安装进度。'
+        }
         Write-Output "$action 通过：安装记录、文件内容和重启状态均符合预期。"
     }
 } finally {
