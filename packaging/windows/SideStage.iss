@@ -222,19 +222,25 @@ begin
   end;
 end;
 
-{ 以打开现有文件的模式探测是否可替换，不创建、截断或写入字节。这样也能识别没有应用互斥量的早期版本。 }
+{ 以打开现有文件的模式探测是否可替换。代理刚退出时 Windows 仍可能短暂拒绝写入；
+  最多等待三秒，期间只尝试打开文件。持续占用时将文件名交给向导提示用户。 }
 function CheckReplaceable(Name: String): String;
 var
   Stream: TFileStream;
+  Attempt: Integer;
 begin
   Result := '';
   if not FileExists(AddBackslash(InstalledDir) + Name) then exit;
-  try
-    Stream := TFileStream.Create(AddBackslash(InstalledDir) + Name, fmOpenReadWrite or fmShareDenyNone);
-    Stream.Free;
-  except
-    Result := FmtMessage(CustomMessage('FileBusy'), [Name]);
+  for Attempt := 0 to 12 do begin
+    try
+      Stream := TFileStream.Create(AddBackslash(InstalledDir) + Name, fmOpenReadWrite or fmShareDenyNone);
+      Stream.Free;
+      exit;
+    except
+      if Attempt < 12 then Sleep(250);
+    end;
   end;
+  Result := FmtMessage(CustomMessage('FileBusy'), [Name]);
 end;
 
 { 写入前确认目录并检查主程序与会话代理；文件被占用时由用户退出或取消，不替用户结束窗口。 }
