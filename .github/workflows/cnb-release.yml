@@ -1,4 +1,4 @@
-# 文件职责：把 GitHub 已公开的安装包同步到维护者配置的 CNB 镜像；不构建、不修改 GitHub 发行版。
+# 文件职责：把 GitHub 已公开的安装包和对应版本源码同步到 CNB；校验附件后才更新镜像首页。
 name: 同步 CNB 发行版
 on:
   release:
@@ -20,6 +20,9 @@ jobs:
     if: github.repository == 'RayFlows/SideStage' || vars.CNB_REPOSITORY != ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      CNB_REPOSITORY: ${{ vars.CNB_REPOSITORY || 'fouramstage/SideStage' }}
     steps:
       # 只运行默认分支上由维护者审核过的发布脚本，不执行旧标签或安装包内的代码。
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -27,11 +30,17 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
+      - name: 离线验证首页同步规则
+        shell: pwsh
+        run: ./packaging/windows/Test-CnbHome.ps1
       - name: 同步并验证免登录下载
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
-          CNB_REPOSITORY: ${{ vars.CNB_REPOSITORY || 'fouramstage/SideStage' }}
           # 官方仓库将令牌命名为 CNB；仍兼容按发布文档配置的 CNB_TOKEN。
           CNB_TOKEN: ${{ secrets.CNB_TOKEN || secrets.CNB }}
         run: ./packaging/windows/Sync-CnbRelease.ps1 -Tag $env:RELEASE_TAG -GitHubRepository $env:GITHUB_REPOSITORY -CnbRepository $env:CNB_REPOSITORY
+      - name: 更新国内下载首页与发布源码
+        shell: pwsh
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN || secrets.CNB }}
+        run: ./packaging/windows/Sync-CnbHome.ps1 -Tag $env:RELEASE_TAG -GitHubRepository $env:GITHUB_REPOSITORY -CnbRepository $env:CNB_REPOSITORY
