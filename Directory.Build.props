@@ -15,4 +15,9 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest</AnalysisLevel>
   </PropertyGroup>
+  <!-- 仅桌面程序和它的离线体验包限制 WinForms 的卫星资源。英文随框架内置；
+       不改变可嵌入库、代理或第三方宿主的本地化策略。 -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'SideStage.App' Or '$(MSBuildProjectName)' == 'SideStage.App.FrameCheck'">
+    <SatelliteResourceLanguages>zh-Hans;zh-Hant</SatelliteResourceLanguages>
+  </PropertyGroup>
 </Project>

@@ -10,6 +10,7 @@
  *   - 服务器名固定为 localhost，不接受远端地址，不存在回退主桌面或普通 RDP 的分支。
  *   - DisconnectPreview 只关闭预览连接，不注销子会话；注销操作由 Core 的终止器负责。
  *   - 活动预览切换音频模式时需先断开，再由宿主重新连接；该流程不注销子会话。
+ *   - 窗口化预览获得键盘焦点时，Alt+Tab 和 Win 键由 RDP 转发给子会话。
  *   - 可选登录凭据只提交给本机 RDP ActiveX，且在登录结果、断开或错误时请求清除。
  *   - 默认不播放子会话音频；调用方可显式选择转发到本机音频设备。
  *   - ActiveX 的连接是异步的；ConnectPreview 返回仅表示连接请求已发出。
@@ -792,6 +793,15 @@ public sealed class ChildSessionPreviewControl : AxHost
 
         // 允许系统协商回环认证；Connect 成功后仍需等待用户登录及 WTS 活动状态。
         SetComProperty(advancedSettings, "EnableCredSspSupport", true);
+
+        // 宿主最大化时 ActiveX 仍处于窗口模式。连接前指定快捷键目标，让系统控件随焦点处理转发。
+        const int applyShortcutsToRemote = 1;
+        object securedSettings = GetComProperty(activeX, "SecuredSettings2")
+            ?? throw new InvalidOperationException("RDP ActiveX 没有提供 SecuredSettings2 接口。");
+        SetComProperty(securedSettings, "KeyboardHookMode", applyShortcutsToRemote);
+        SetComProperty(advancedSettings, "EnableWindowsKey", 1);
+        VerifyIntegerProperty(securedSettings, "KeyboardHookMode", applyShortcutsToRemote);
+        VerifyBooleanProperty(advancedSettings, "EnableWindowsKey", expectedValue: true);
 
         ConfigureDisplaySettings(activeX, settings);
 

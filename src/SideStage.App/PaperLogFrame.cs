@@ -24,7 +24,7 @@ internal sealed class PaperLogFrame : Panel
         ResizeRedraw = true;
         Dock = DockStyle.Fill;
         Margin = Padding.Empty;
-        Padding = new Padding(PaperFieldSurface.TextInset, 7, 12, 7);
+        DrawerMetrics.Bind(this, () => Padding = DrawerMetrics.Space(this, PaperFieldSurface.TextInset, 7, 12, 7));
         log.BackColor = PaperFieldSurface.Paper;
         log.BorderStyle = BorderStyle.None;
         log.Dock = DockStyle.Fill;

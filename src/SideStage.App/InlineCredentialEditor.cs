@@ -30,15 +30,14 @@ internal sealed class InlineCredentialEditor : PaperScrollPage
         _submit = submit;
         _delete = delete;
         TableLayoutPanel stack = new() { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 1, Padding = new Padding(0, 0, 0, 4) };
+            ColumnCount = 1 };
+        DrawerMetrics.Bind(stack, () => stack.Padding = DrawerMetrics.Space(stack, 0, 0, 0, 4));
         stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         SetPageContent(stack);
         SettingsList fields = new();
         stack.Controls.Add(fields);
         fields.AddRow(InputRow("账户名", _account, "Windows 账户名"));
-        fields.AddRow(InputRow("密码", _password, "Windows 账户密码"));
-        _password.UseSystemPasswordChar = true;
-        _password.ImeMode = ImeMode.Disable;
+        fields.AddRow(InputRow("密码", _password, "Windows 账户密码", new PasswordVisibilityButton(_password)));
         _advanced = new SettingsSwitch("高级选项（域账户）", font);
         fields.AddRow(_advanced);
         var domainRow = InputRow("所属域", _domain, "本机账户留空");
@@ -53,7 +52,7 @@ internal sealed class InlineCredentialEditor : PaperScrollPage
         stack.Controls.Add(SettingsCaption.Footnote(
             "分身用 Windows 账户密码登录，请填写账户密码而非 PIN。保存后，下次连接可自动登录。凭据仅保存在本机 Windows 凭据管理器，不会上传。", smallFont));
 
-        var actions = new SettingsList { Margin = new Padding(0, 13, 0, 2) };
+        var actions = new SettingsList(13, 2);
         stack.Controls.Add(actions);
         actions.AddRow(new SettingsActionRow(connecting ? "连接" : "保存凭据", font, Submit));
         _remove = new SettingsActionRow("删除已保存的凭据", font, (_, _) => SetConfirmation(true))
@@ -61,13 +60,13 @@ internal sealed class InlineCredentialEditor : PaperScrollPage
         actions.AddRow(_remove);
         _feedback.AutoSize = true;
         _feedback.Dock = DockStyle.Top;
-        _feedback.Margin = new Padding(PaperFieldSurface.TextInset, 8, PaperFieldSurface.TextInset, 2);
+        DrawerMetrics.Margin(_feedback, PaperFieldSurface.TextInset, 8, PaperFieldSurface.TextInset, 2);
         _feedback.ForeColor = PaperFieldSurface.Ink;
         _feedback.Visible = false;
         _feedback.TextChanged += (_, _) => _feedback.Visible = _feedback.Text.Length > 0;
         stack.Controls.Add(_feedback);
         _confirm.AutoSize = true;
-        _confirm.Margin = new Padding(PaperFieldSurface.TextInset, 4, 0, 0);
+        DrawerMetrics.Margin(_confirm, PaperFieldSurface.TextInset, 4, 0, 0);
         _confirm.Visible = false;
         _confirm.Controls.Add(ConfirmationButton("取消", (_, _) => SetConfirmation(false)));
         _confirm.Controls.Add(ConfirmationButton("确认删除", DeleteSaved));
@@ -81,17 +80,20 @@ internal sealed class InlineCredentialEditor : PaperScrollPage
     }
 
     /// <summary>创建带有可访问名称的输入行，使用弹性列给长账户名保留编辑空间。</summary>
-    private SettingsInputRow InputRow(string name, TextBox input, string placeholder)
+    private SettingsInputRow InputRow(string name, TextBox input, string placeholder, Button? trailingAction = null)
     {
         input.PlaceholderText = placeholder;
         input.BorderStyle = BorderStyle.None;
-        return new SettingsInputRow(name, input, Font);
+        return new SettingsInputRow(name, input, Font, trailingAction);
     }
 
     /// <summary>为删除确认提供两个键盘可操作的按钮。</summary>
     private Button ConfirmationButton(string caption, EventHandler click)
     {
-        PaperCommandButton button = new() { Text = caption, Size = new Size(88, 32), Font = Font };
+        PaperCommandButton button = new() { Text = caption, Font = Font };
+        DrawerMetrics.Bind(button, () => button.Size = new Size(Math.Max(button.LogicalToDeviceUnits(88),
+            button.PreferredSize.Width), DrawerMetrics.RowHeight(button, 32)));
+        DrawerMetrics.Margin(button, 3, 3, 3, 3);
         button.Click += click;
         return button;
     }

@@ -3,6 +3,7 @@
     <Project Path="src/SideStage.App/SideStage.App.csproj" />
     <Project Path="src/SideStage.Core/SideStage.Core.csproj" />
     <Project Path="src/SideStage.SessionAgent/SideStage.SessionAgent.csproj" />
+    <Project Path="src/SideStage.Updater/SideStage.Updater.csproj" />
     <Project Path="src/SideStage.Windows/SideStage.Windows.csproj" />
   </Folder>
   <Folder Name="/tools/">

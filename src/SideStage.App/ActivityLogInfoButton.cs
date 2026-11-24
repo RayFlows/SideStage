@@ -26,21 +26,23 @@ internal sealed class ActivityLogInfoButton : Button
         ForeColor = PaperFieldSurface.Brass;
         FlatStyle = FlatStyle.Flat;
         FlatAppearance.BorderSize = 0;
-        Size = new Size(28, 27);
+        DrawerMetrics.Bind(this, () => Size = new Size(LogicalToDeviceUnits(28), DrawerMetrics.RowHeight(this, 27, 3)));
         Anchor = AnchorStyles.Right;
-        Margin = new Padding(0, 0, 5, 3);
+        DrawerMetrics.Margin(this, 0, 0, 5, 3);
         Color surface = PaperHintBubble.Surface;
         TableLayoutPanel content = new()
         {
             ColumnCount = 1, RowCount = 2, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            BackColor = surface, Font = bodyFont, Padding = new Padding(12, 9, 14, 10),
+            BackColor = surface, Font = bodyFont,
         };
+        DrawerMetrics.Bind(content, () => content.Padding = DrawerMetrics.Space(content, 12, 9, 14, 10));
         content.Controls.Add(new Label { Text = $"{Program.DisplayName} 的活动记录", AutoSize = true,
             ForeColor = Color.FromArgb(249, 243, 229), Margin = Padding.Empty }, 0, 0);
         _link = new LinkLabel { Text = "打开完整日志文件夹  ›", AutoSize = true, Font = bodyFont,
-            Margin = new Padding(0, 5, 0, 0), LinkBehavior = LinkBehavior.HoverUnderline,
+            LinkBehavior = LinkBehavior.HoverUnderline,
             LinkColor = Color.FromArgb(184, 225, 211), ActiveLinkColor = Color.White, AccessibleName = "打开完整日志文件夹" };
         content.Controls.Add(_link, 0, 1);
+        DrawerMetrics.Margin(_link, 0, 5, 0, 0);
         _popup = new PaperHintBubble(this);
         _popup.Items.Add(new ToolStripControlHost(content) { Padding = Padding.Empty, Margin = Padding.Empty });
         _link.LinkClicked += (_, _) => OpenFromBubble();

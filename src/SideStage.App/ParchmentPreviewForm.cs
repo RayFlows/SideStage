@@ -42,12 +42,15 @@ internal sealed partial class ParchmentPreviewForm : Form
     private readonly string _logDirectory, _logFile;
     private readonly Action<string> _openFolder;
     private bool _logWriteFailed;
-    private readonly ChildSessionPreviewPanel _previewPanel = new();
+    private readonly ChildSessionPreviewPanel _previewPanel = new(ChildSessionPreviewSettings.Default,
+        ChildSessionAudioMode.DoNotPlay, surface => new PaperScrollPage(surface) { BackColor = CardLight });
     private readonly System.Windows.Forms.Timer _refreshTimer = new();
 
     // ── UI 控件引用 ───────────────────────────────────────────────────────
     private Panel?  _centerCard;
+    private PaperSurface? _homePaper;
     private Panel?  _settingsDrawer;       // 右侧滑出设置抽屉
+    private DrawerCollapseTab? _drawerTab;
     private Panel?  _workspace;
     private Label?  _systemText;
     private EditionIndicator? _editionIndicator;
@@ -97,11 +100,13 @@ internal sealed partial class ParchmentPreviewForm : Form
     /// <summary>创建默认验收窗口。初始状态只读取系统信息，由用户发起连接。</summary>
     public ParchmentPreviewForm() : this(new WindowsChildSessionCredentialStore()) { }
 
-    /// <summary>使用指定凭据库建立预览窗口，允许界面验收使用独立的临时保存项。</summary>
+    /// <summary>建立实际主窗口。正式入口使用构建指定的更新源及用户偏好；界面验收可隔离凭据、发行数据和更新偏好。</summary>
     internal ParchmentPreviewForm(WindowsChildSessionCredentialStore credentialStore, string? logDirectory = null,
         Action<string>? openFolder = null, bool pollSessions = true, ISessionInspector? sessionInspector = null,
-        Func<Task>? enableChildSessions = null)
+        Func<Task>? enableChildSessions = null, ReleaseUpdateFeed? updateFeed = null, string updatePreferenceKey = UpdatePreferenceKey)
     {
+        _updates = updateFeed ?? ReleaseUpdateFeed.FromBuild();
+        _updatePreferenceKey = updatePreferenceKey;
         _sessionInspector = sessionInspector ?? new WindowsSessionInspector();
         _enableChildSessions = enableChildSessions ?? ChildSessionEnableCommand.EnableAsync;
         _credentialStore = credentialStore;
@@ -122,13 +127,13 @@ internal sealed partial class ParchmentPreviewForm : Form
         BuildLayout();
         BindBackgroundClicks(this);
         // 首次显示后才准备原生控件；从 Windows 凭据管理器切回时也能看到外部修改。
-        Activated += (_, _) => RefreshCredentialCheck();
+        Activated += RefreshOnActivation;
         Shown += (_, _) =>
         {
             ShowWindowsEdition();
             if (_checkCredentialText?.Text.Length == 0) RefreshCredentialCheck();
             RefreshSessionStatus();
-            if (_startupUpdates?.Checked == true) _ = CheckUpdatesAsync();
+            if (_startupUpdates?.Checked == true) _ = CheckUpdatesAsync(startup: true);
         };
         if (pollSessions) ConfigureRefreshTimer();
         RefreshSessionStatus();
@@ -136,6 +141,8 @@ internal sealed partial class ParchmentPreviewForm : Form
 
         FormClosed += (_, _) =>
         {
+            // 所属更新窗销毁时可能把焦点还给主窗；不能在提示控件释放后再刷新凭据。
+            Activated -= RefreshOnActivation;
             _updateLifetime.Cancel();
             _updateLifetime.Dispose();
             _refreshTimer.Dispose();
@@ -147,6 +154,14 @@ internal sealed partial class ParchmentPreviewForm : Form
             _bodyFont.Dispose();
             _labelFont.Dispose();
         };
+    }
+
+    /// <summary>切回仍在使用的主窗时刷新凭据并处理延后的更新提示；关闭期间的焦点归还不触发刷新。</summary>
+    private void RefreshOnActivation(object? sender, EventArgs e)
+    {
+        if (IsDisposed || Disposing || _confirmingClose || !IsHandleCreated) return;
+        RefreshCredentialCheck();
+        if (_pendingUpdatePrompt) BeginInvoke(TryPresentStartupUpdate);
     }
 
     /// <summary>窗口句柄重建时，重新设置系统菜单与外框合成属性。</summary>
@@ -177,6 +192,11 @@ internal sealed partial class ParchmentPreviewForm : Form
         _settingsDrawer = BuildSettingsDrawer();
         _settingsDrawer.Visible = false;
         mainContainer.Controls.Add(_settingsDrawer);
+        // 把手跨过侧栏左缘，作为工作区的同级窗口才能在原生预览上接收点击。
+        _drawerTab = new DrawerCollapseTab(_settingsDrawer.BackColor, TextMuted, _labelFont) { Visible = false };
+        _drawerTab.Click += ToggleSettings;
+        mainContainer.Controls.Add(_drawerTab);
+        mainContainer.DpiChangedAfterParent += (_, _) => PositionSettingsDrawer();
 
         // 中央卡片（未连接时）
         _centerCard = BuildCenterCard();
@@ -193,7 +213,13 @@ internal sealed partial class ParchmentPreviewForm : Form
         {
             RestorePaintedRim();
             if (!_settingsDrawer.Visible) LeaveCredentialPage();
-            if (_centerCard.Visible) _centerCard.PerformLayout();
+            PositionSettingsDrawer();
+            _drawerTab.Visible = _settingsDrawer.Visible;
+            if (_drawerTab.Visible)
+            {
+                _settingsDrawer.BringToFront();
+                _drawerTab.BringToFront();
+            }
         };
 
         _gear = new SettingsGear { Visible = false };
@@ -210,31 +236,23 @@ internal sealed partial class ParchmentPreviewForm : Form
     /// <summary>将会话检查和操作居中排在整张纸面上，保持中文字段和值便于扫读的行宽。</summary>
     private Panel BuildCenterCard()
     {
-        const int checkCount = 6, rowHeight = 39, titleHeight = 55, commandsHeight = 76, verticalPadding = 39;
+        const int checkCount = 6;
         // 纸页自己绘制整张背景。透明底只用于中央小表，拖动时无需逐层回调父窗口重画整页。
-        PaperSurface container = new() { Dock = DockStyle.Fill, Margin = Padding.Empty };
-        TableLayoutPanel card = new PaperSurface.BufferedTable()
+        PaperSurface container = new() { Margin = Padding.Empty, AutoScroll = true };
+        _homePaper = container;
+        PaperScrollPage viewport = new(container) { BackColor = container.BackColor };
+        PaperSurface.BufferedTable card = new()
         {
             Anchor = AnchorStyles.Top | AnchorStyles.Left, Margin = Padding.Empty, BackColor = Color.Transparent,
-            Padding = new Padding(40, verticalPadding, 40, verticalPadding),
-            Size = new Size(500, 2 * verticalPadding + titleHeight + checkCount * rowHeight + commandsHeight),
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 3, RowCount = checkCount + 2,
         };
-        card.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 22));
+        card.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         card.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         card.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        card.RowStyles.Add(new RowStyle(SizeType.Absolute, titleHeight));
-        for (int row = 0; row < checkCount; row++)
-            card.RowStyles.Add(new RowStyle(SizeType.Absolute, rowHeight));
-        card.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        container.Controls.Add(card);
-        container.Layout += (_, _) =>
-        {
-            // 抽屉覆盖工作区。只挪动首页上的检查表，实时预览始终使用整个工作区。
-            int occupied = _settingsDrawer?.Visible == true ? _settingsDrawer.Width : 0;
-            card.Location = new Point(Math.Max(0, (container.ClientSize.Width - occupied - card.Width) / 2),
-                (container.ClientSize.Height - card.Height) / 2);
-        };
+        for (int row = 0; row < card.RowCount; row++)
+            card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        viewport.SetPageContent(card);
         Label title = new()
         {
             Text = "环境检查",
@@ -255,21 +273,12 @@ internal sealed partial class ParchmentPreviewForm : Form
         (_checkParentIcon, _checkParentText) = AddCheckRow(card, 4, "主桌面");
         (_connectionIcon, _connectionText) = AddCheckRow(card, 5, "RDP 连接");
         (_checkCredentialIcon, _checkCredentialText) = AddCheckRow(card, 6, "登录凭据", _configureCredentialsButton);
-        card.CellPaint += (_, args) =>
-        {
-            if (args.Row is >= 1 and <= checkCount)
-            {
-                using Pen line = new(Color.FromArgb(210, 192, 161));
-                args.Graphics.DrawLine(line, args.CellBounds.Left, args.CellBounds.Bottom-1,
-                    args.CellBounds.Right, args.CellBounds.Bottom-1);
-            }
-        };
 
         // 主连接按钮
         _connectButton = new PaperCommandButton
         {
             Text = "连接",
-            Size = new Size(138, 38),
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(138, 38),
             Margin = new Padding(0, 0, 8, 0),
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand,
@@ -279,18 +288,20 @@ internal sealed partial class ParchmentPreviewForm : Form
         };
         _connectButton.FlatAppearance.BorderSize = 0;
         _connectButton.Click += ConnectPreview;
-        FlowLayoutPanel commands = new() { AutoSize = true, Anchor = AnchorStyles.None, Margin = Padding.Empty,
+        FlowLayoutPanel commands = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.None, Margin = Padding.Empty,
             WrapContents = false, BackColor = Color.Transparent };
         commands.Controls.Add(_connectButton);
         Button advanced = MakePaperCommand("高级设置", ToggleSettings);
         _homeSettings = advanced;
-        advanced.AutoSize = false;
-        advanced.Size = new Size(112, 38);
+        advanced.AutoSize = true;
+        advanced.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        advanced.MinimumSize = new Size(112, 38);
         advanced.Margin = Padding.Empty;
         commands.Controls.Add(advanced);
-        card.Controls.Add(commands, 0, checkCount + 1);
+        card.Controls.Add(commands, 0, card.RowCount - 1);
         card.SetColumnSpan(commands, 3);
-        return container;
+        ConfigureHomeLayout(container, card, title, commands);
+        return viewport;
     }
 
     /// <summary>构造由状态色标、字段名和右对齐动态值组成的一行。</summary>
@@ -298,8 +309,10 @@ internal sealed partial class ParchmentPreviewForm : Form
         EditionIndicator? statusIcon = null)
     {
         Label icon = (Label?)statusIcon ?? new Label { AutoSize = true, Anchor = AnchorStyles.Left, Margin = Padding.Empty, Font = _labelFont };
-        Label label = new() { AutoSize = true, Text = caption, Font = _sectionFont, ForeColor = TextMuted, Anchor = AnchorStyles.Left };
-        Label value = new() { AccessibleName = caption + "状态", AutoEllipsis = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, Font = _bodyFont, ForeColor = TextOnLight };
+        icon.AutoSize = true;
+        Label label = new() { AutoSize = true, Text = caption, Font = _sectionFont, ForeColor = TextMuted,
+            Anchor = AnchorStyles.Left, TextAlign = ContentAlignment.MiddleLeft };
+        Label value = new() { AccessibleName = caption + "状态", AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight, Font = _bodyFont, ForeColor = TextOnLight };
         statusIcon?.BindHover(label);
         statusIcon?.BindHover(value);
         table.Controls.Add(icon, 0, row);
@@ -311,10 +324,12 @@ internal sealed partial class ParchmentPreviewForm : Form
         else
         {
             // 隐藏已完成项目的按钮时自动收回末列，让结果文字仍与其余行的右缘对齐。
-            TableLayoutPanel trailing = new() { Dock = DockStyle.Fill, Margin = Padding.Empty,
+            TableLayoutPanel trailing = new() { Dock = DockStyle.Fill, Margin = Padding.Empty, AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BackColor = Color.Transparent, ColumnCount = 2, RowCount = 1 };
             trailing.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             trailing.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            trailing.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             trailing.Controls.Add(value, 0, 0);
             trailing.Controls.Add(action, 1, 0);
             table.Controls.Add(trailing, 2, row);
@@ -327,7 +342,7 @@ internal sealed partial class ParchmentPreviewForm : Form
     {
         PaperCommandButton button = new()
         {
-            Text = caption, Font = _labelFont, Size = new Size(100, 28),
+            Text = caption, Font = _labelFont, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(100, 28),
             Anchor = AnchorStyles.Right, Margin = new Padding(9, 0, 3, 0), Visible = false,
             FaceColor = Color.FromArgb(230, 218, 192), ForeColor = PaperFieldSurface.Ink,
         };
@@ -357,8 +372,6 @@ internal sealed partial class ParchmentPreviewForm : Form
         if (_gear != null) _gear.Visible = _centerCard?.Visible == false && !_settingsDrawer.Visible;
         if (_settingsDrawer.Visible)
         {
-            PositionSettingsDrawer();
-            _settingsDrawer.BringToFront();
             _settingsDrawer.SelectNextControl(null, true, true, true, true);
         }
         else if (_centerCard?.Visible == true) _connectButton?.Focus();
@@ -425,40 +438,48 @@ internal sealed partial class ParchmentPreviewForm : Form
     {
         Panel drawer = new()
         {
-            Width = 348,
             BackColor = Color.FromArgb(238, 228, 210),
-            Padding = new Padding(18, 8, 18, 12),
         };
+        DrawerMetrics.Bind(drawer, () => drawer.Padding = DrawerMetrics.Space(drawer, 18, 8, 18, 12));
         TableLayoutPanel layout = new()
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Margin = Padding.Empty,
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = Padding.Empty,
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 136));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var logArea = new RowStyle(SizeType.Absolute);
+        layout.RowStyles.Add(logArea);
         drawer.Controls.Add(layout);
         // 左右保留相同的导航宽度。返回键显隐时，标题的中心始终与侧栏中心重合。
-        TableLayoutPanel heading = new() { Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 3, RowCount = 1 };
-        heading.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 44));
+        TableLayoutPanel heading = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 3, RowCount = 1 };
+        heading.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute));
         heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        heading.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 44));
+        heading.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute));
         _drawerBack = new PaperCommandButton
         {
             Text = "\uE72B", Font = _drawerArrowFont, AccessibleName = "返回高级设置",
             Circular = true, ForeColor = TextMuted, Anchor = AnchorStyles.Left,
-            Size = new Size(38, 38), Margin = Padding.Empty, Visible = false,
+            Margin = Padding.Empty, Visible = false,
         };
         _drawerBack.Click += (_, _) => LeaveCredentialPage();
         _commandHints.SetToolTip(_drawerBack, "返回高级设置");
         heading.Controls.Add(_drawerBack, 0, 0);
-        _drawerTitle = new Label { Text = "高级设置", Font = _drawerTitleFont, ForeColor = TextOnLight,
+        _drawerTitle = new Label { Text = "高级设置", Font = _drawerTitleFont, ForeColor = TextOnLight, AutoSize = true,
             Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Margin = Padding.Empty };
+        DrawerMetrics.Bind(heading, () =>
+        {
+            int side = heading.LogicalToDeviceUnits(44);
+            heading.ColumnStyles[0].Width = heading.ColumnStyles[2].Width = side;
+            heading.MinimumSize = new Size(0, heading.LogicalToDeviceUnits(48));
+            _drawerBack.Size = heading.LogicalToDeviceUnits(new Size(38, 38));
+        });
         heading.Controls.Add(_drawerTitle, 1, 0);
         layout.Controls.Add(heading, 0, 0);
-        _drawerPages = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 7, 0, 0) };
+        _drawerPages = new Panel { Dock = DockStyle.Fill };
+        DrawerMetrics.Margin(_drawerPages, 0, 7, 0, 0);
         PaperScrollPage overview = new();
         _overview = overview;
         TableLayoutPanel options = new() { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
@@ -470,7 +491,7 @@ internal sealed partial class ParchmentPreviewForm : Form
         options.Controls.Add(BuildCompactSettingsPanel());
         options.Controls.Add(SettingsCaption.Footnote(
             "连接中切换静音会自动重连。缩放和宽高比即时生效，更改分辨率需先断开。", _labelFont));
-        SettingsList account = new() { Margin = new Padding(0, 16, 0, 6) };
+        SettingsList account = new(16, 6);
         _credentialsRow = new SettingsActionRow("登录凭据", _bodyFont, ManageCredentials, disclosure: true);
         account.AddRow(_credentialsRow);
         options.Controls.Add(account);
@@ -491,7 +512,9 @@ internal sealed partial class ParchmentPreviewForm : Form
         options.Controls.Add(session);
         AddUpdateSettings(options);
         layout.Controls.Add(_drawerPages, 0, 1);
-        TableLayoutPanel logHeading = new() { Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 2, RowCount = 1 };
+        TableLayoutPanel logHeading = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 2, RowCount = 1 };
+        DrawerMetrics.Bind(logHeading, () => logHeading.MinimumSize = new Size(0, logHeading.LogicalToDeviceUnits(35)));
         logHeading.Paint += (_, e) =>
         {
             int inset = logHeading.LogicalToDeviceUnits(PaperFieldSurface.TextInset);
@@ -510,18 +533,21 @@ internal sealed partial class ParchmentPreviewForm : Form
             Font = _labelFont,
         };
         layout.Controls.Add(new PaperLogFrame(_eventLog), 0, 3);
-        // 收起操作固定在日志下方，滚动设置或打开域账户字段时仍可直接触及。
-        PaperCommandButton close = new() { Text = "收起侧栏", AccessibleName = "收起侧栏", Font = _bodyFont,
-            FaceColor = Color.FromArgb(227, 215, 193), ForeColor = TextOnLight,
-            Dock = DockStyle.Fill, Margin = new Padding(0, 10, 0, 0) };
-        close.Click += ToggleSettings;
-        layout.Controls.Add(close, 0, 4);
+        // 高窗口保留完整日志框；矮窗口最多分配四分之一给日志正文，让中间设置列表可以滚动。
+        void SizeLogArea() => logArea.Height = Math.Min(layout.LogicalToDeviceUnits(136), layout.ClientSize.Height / 4);
+        DrawerMetrics.Bind(layout, SizeLogArea);
+        layout.SizeChanged += (_, _) => SizeLogArea();
         return drawer;
     }
 
     /// <summary>以统一的粗体字级和上下间距区分抽屉中的设置分组。</summary>
-    private Label SectionHeading(string text) => new SettingsCaption { Text = text, AutoSize = true, Font = _sectionFont,
-        Anchor = AnchorStyles.Left, ForeColor = TextOnLight, Margin = new Padding(PaperFieldSurface.TextInset, 4, 0, 8) };
+    private Label SectionHeading(string text)
+    {
+        SettingsCaption caption = new() { Text = text, AutoSize = true, Font = _sectionFont,
+            Anchor = AnchorStyles.Left, ForeColor = TextOnLight };
+        DrawerMetrics.Margin(caption, PaperFieldSurface.TextInset, 4, 0, 8);
+        return caption;
+    }
 
     /// <summary>为本窗口的非交互表面绑定点击行为。点纸面、标题或字段名时，结束输入并保留草稿。</summary>
     private void BindBackgroundClicks(Control surface)
@@ -545,13 +571,21 @@ internal sealed partial class ParchmentPreviewForm : Form
         }
     }
 
-    /// <summary>将显式打开的设置抽屉靠右对齐，保留预览面板自身的尺寸及坐标系。</summary>
+    /// <summary>右侧放置设置抽屉，首页保留独立可滚动的可见区域。实时预览仍占满工作区。</summary>
     private void PositionSettingsDrawer()
     {
-        if (_workspace is null || _settingsDrawer?.Visible != true) return;
+        if (_workspace is null || _settingsDrawer is null || _centerCard is null) return;
         Size area = _workspace.ClientSize;
+        if (!_settingsDrawer.Visible)
+        {
+            _centerCard.Dock = DockStyle.Fill;
+            return;
+        }
         int width = Math.Min(area.Width, LogicalToDeviceUnits(348));
         _settingsDrawer.Bounds = new Rectangle(area.Width-width, 0, width, area.Height);
+        _drawerTab?.PlaceAt(_settingsDrawer);
+        _centerCard.Dock = DockStyle.Left;
+        _centerCard.Width = area.Width - width;
     }
 
     // ── 操作：连接 ───────────────────────────────────────────────────────
@@ -909,6 +943,7 @@ internal sealed partial class ParchmentPreviewForm : Form
             bool targetMatches = disconnected || _previewPanel.PreviewControl.VerifiedConnectionTarget == child?.Id;
             UpdateSessionCommands(!disconnected || _audioReconnect.Active, targetMatches && child is { IsChildSession: true, StateQueryError: null } && child.Id != parent.Id);
             SwitchMainView(prev);
+            TryPresentStartupUpdate();
             _lastPollError = null;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception

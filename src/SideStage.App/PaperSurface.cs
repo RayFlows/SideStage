@@ -20,6 +20,10 @@ internal sealed class PaperSurface : Panel
     {
         private readonly Svg.SvgDocument _frame;
         private Bitmap? _raster;
+        private int _motifWidth;
+        /// <summary>当前字号下整幅花纹的基准宽度，由检查表布局随字号和 DPI 一起更新。</summary>
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        internal int OrnamentWidth { get; set; } = 500;
 
         /// <summary>仅缓冲首页的小表，不干预原生远程桌面子窗口的绘制。</summary>
         internal BufferedTable()
@@ -30,24 +34,52 @@ internal sealed class PaperSurface : Panel
             _frame = Svg.SvgDocument.Open<Svg.SvgDocument>(stream);
         }
 
-        /// <summary>按表格宽度重新采样矢量素材。上下方角和菱纹等比绘制，仅调整中段直线的长度。</summary>
+        /// <summary>按显示器 DPI 采样角花和菱纹，随内容宽高只延长两条轴上的直线。</summary>
         protected override void OnPaintBackground(PaintEventArgs e)
         {
             base.OnPaintBackground(e);
             if (Width < 8 || Height < 8) return;
-            if (_raster?.Width != Width)
+            int motifWidth = Math.Min(Width, OrnamentWidth);
+            if (_raster?.Width != Width || _motifWidth != motifWidth)
             {
                 _raster?.Dispose();
-                _raster = _frame.Draw(Width, 0);
+                _raster = RenderHorizontalRails(Width, motifWidth);
+                _motifWidth = motifWidth;
             }
             // 源图上下各 100 个单位包含全部角花，中段只有左右两条金线。
-            int cap = Math.Min(Height / 2, (int)Math.Ceiling(_raster.Width * 100 / _frame.ViewBox.Width));
+            int cap = Math.Min(Height / 2, (int)Math.Ceiling(motifWidth * 100 / _frame.ViewBox.Width));
             int middle = Height - cap * 2;
             e.Graphics.DrawImage(_raster, new Rectangle(0, 0, Width, cap), 0, 0, Width, cap, GraphicsUnit.Pixel);
             if (middle > 0) e.Graphics.DrawImage(_raster, new Rectangle(0, cap, Width, middle),
                 0, cap, Width, _raster.Height - 2 * cap, GraphicsUnit.Pixel);
             e.Graphics.DrawImage(_raster, new Rectangle(0, Height - cap, Width, cap),
                 0, _raster.Height - cap, Width, cap, GraphicsUnit.Pixel);
+        }
+
+        /// <summary>用原图四分之一及四分之三处的直线填充新增宽度，保留两端方角和中央菱纹的像素比例。</summary>
+        private Bitmap RenderHorizontalRails(int width, int motifWidth)
+        {
+            if (width == motifWidth) return _frame.Draw(width, 0);
+            using Bitmap source = _frame.Draw(motifWidth, 0);
+            Bitmap target = new(width, source.Height);
+            using Graphics graphics = Graphics.FromImage(target);
+            graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+            graphics.PixelOffsetMode = PixelOffsetMode.Half;
+            int left = motifWidth / 4, right = motifWidth - left;
+            int extra = width - motifWidth, first = extra / 2;
+            Copy(0, left, 0, left);
+            Copy(left, 1, left, first);
+            Copy(left, right - left, left + first, right - left);
+            Copy(right, 1, right + first, extra - first);
+            Copy(right, left, right + extra, left);
+            return target;
+
+            // 等高复制确保相邻纸纹线条逐像素衔接。
+            void Copy(int from, int count, int to, int span)
+            {
+                if (span > 0) graphics.DrawImage(source, new Rectangle(to, 0, span, source.Height),
+                    from, 0, count, source.Height, GraphicsUnit.Pixel);
+            }
         }
 
         /// <summary>在首页释放时归还当前 DPI 下的内框位图。</summary>

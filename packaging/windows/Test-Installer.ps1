@@ -5,7 +5,7 @@
     使用一次性目录，验证首次安装、快捷方式、首页启动、运行时来源、重复安装和卸载。
     没有干净的试装位置时直接停止；不覆盖已有安装，不发送点击或按键，不连接子会话。
 .PARAMETER Installer
-    由同目录 Build-Installer.ps1 生成的可信安装包。验收记录保存在 artifacts/installer-tests。
+    由同目录 Build-Installer.ps1 生成的可信安装包。验收记录保存在 artifacts/checks/installer。
 #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string] $Installer)
@@ -22,7 +22,7 @@ foreach ($existing in @($userKey, "HKLM:\$key", $shortcut, $desktop, $defaultDir
 }
 
 $root = (Get-Item -LiteralPath "$PSScriptRoot/../..").FullName
-$run = Join-Path $root ("artifacts/installer-tests/" + [guid]::NewGuid().ToString('N'))
+$run = Join-Path $root ("artifacts/checks/installer/" + [guid]::NewGuid().ToString('N'))
 $dir = Join-Path $run 'SideStage 试装'
 $exe = Join-Path $dir 'SideStage.exe'
 $idleTitle = "SideStage $([char]0x2014) 未连接"
@@ -84,6 +84,7 @@ $installArgs = "$quiet /LANG=zhcn /DIR=`"$dir`""
 $app = $null
 try {
     Invoke-Setup $setup "$installArgs /LOG=`"$run/install.log`""
+    & (Join-Path $PSScriptRoot 'Test-PublishLayout.ps1') -Directory $dir
     $entryPoint = Get-InstalledEntry
     $firstUninstaller = Get-OwnedUninstaller
     Write-Output '首次安装：当前用户卸载记录、开始菜单入口和默认图标选项通过。'

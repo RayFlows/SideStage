@@ -120,10 +120,10 @@ internal static class VerticalResizeCheck
     private static bool CheckRimLifetime(Form window)
     {
         Rectangle start = window.Bounds;
-        Panel workspace = window.Controls.OfType<Panel>().Single(panel => panel.Controls.OfType<PaperSurface>().Any());
-        PaperSurface paper = workspace.Controls.OfType<PaperSurface>().Single();
+        Panel workspace = window.Controls.OfType<Panel>().Single(panel => panel.Controls.OfType<PaperScrollPage>().Any());
+        var page = workspace.Controls.OfType<PaperScrollPage>().Single();
         Panel drawer = workspace.Controls.OfType<Panel>().Single(panel => panel.GetType() == typeof(Panel));
-        Button settings = paper.Controls.OfType<TableLayoutPanel>().Single()
+        Button settings = page.Controls[0].Controls.OfType<PaperSurface>().Single().Controls.OfType<TableLayoutPanel>().Single()
             .Controls.OfType<FlowLayoutPanel>().Single().Controls.OfType<Button>().Single(button => button.Text == "高级设置");
         using Panel marker = new() { BackColor = Color.Lime, Dock = DockStyle.Fill };
         drawer.Controls.Add(marker);

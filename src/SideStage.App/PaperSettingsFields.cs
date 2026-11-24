@@ -56,11 +56,13 @@ internal static class PaperFieldSurface
 internal sealed class SettingsCaption : Label
 {
     /// <summary>生成设置分组下的小字说明，在同一条文字基线上按侧栏宽度自动换行。</summary>
-    internal static SettingsCaption Footnote(string text, Font smallFont) => new()
+    internal static SettingsCaption Footnote(string text, Font smallFont)
     {
-        Text = text, Font = smallFont, ForeColor = Color.FromArgb(101, 85, 67),
-        AutoSize = true, Dock = DockStyle.Top, Margin = new Padding(PaperFieldSurface.TextInset, 2, PaperFieldSurface.TextInset, 0),
-    };
+        SettingsCaption caption = new() { Text = text, Font = smallFont, ForeColor = Color.FromArgb(101, 85, 67),
+            AutoSize = true, Dock = DockStyle.Top };
+        DrawerMetrics.Margin(caption, PaperFieldSurface.TextInset, 2, PaperFieldSurface.TextInset, 0);
+        return caption;
+    }
 
     /// <summary>从控件的左缘绘字，外部布局统一承担缩进。保留 Label 的测量、换行与辅助功能。</summary>
     protected override void OnPaint(PaintEventArgs e)
@@ -89,13 +91,8 @@ internal sealed class PaperComboBox : ComboBox
         LostFocus += (_, _) => Invalidate();
         SelectedIndexChanged += (_, _) => Invalidate();
         DropDownClosed += (_, _) => Invalidate();
-    }
-
-    /// <summary>按当前字体预留选项上下空间，使不同字号和 DPI 下的中文保持完整。</summary>
-    protected override void OnFontChanged(EventArgs e)
-    {
-        base.OnFontChanged(e);
-        ItemHeight = Math.Max(Font.Height + LogicalToDeviceUnits(6), LogicalToDeviceUnits(36) - 6);
+        // 原生只读组合框在选项高度之外另加六个设备像素作为收拢框边缘。
+        DrawerMetrics.Bind(this, () => ItemHeight = DrawerMetrics.RowHeight(this, 36) - 6);
     }
 
     /// <summary>整个选择行都是同一个原生控件。左边绘制字段名，右边绘制当前值和展开标记。</summary>

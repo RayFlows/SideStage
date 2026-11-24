@@ -5,7 +5,7 @@
  *
  * 安全边界：
  *   - 不把密码写入事件日志、配置文件、命令行参数或窗口标题。
- *   - 密码输入框使用系统密码遮罩；确认后立即清空控件内容。
+ *   - 密码默认以小圆点遮盖，可由用户主动查看；确认后立即清空控件内容。
  *   - 长期保存只调用 WindowsChildSessionCredentialStore，不实现网络访问。
  *   - RDP 连接仍由 Windows 登录组件处理；此对话框不模拟键盘输入。
  */
@@ -127,9 +127,7 @@ internal sealed class CredentialInputDialog : Form
         _rootLayout.SetColumnSpan(note, 2);
 
         ConfigureLabelAndInput(_rootLayout, "账户名", _userNameInput, 1);
-        ConfigureLabelAndInput(_rootLayout, "账户密码", _passwordInput, 2);
-        _passwordInput.UseSystemPasswordChar = true;
-        _passwordInput.ImeMode = ImeMode.Disable;
+        ConfigureLabelAndInput(_rootLayout, "账户密码", _passwordInput, 2, new PasswordVisibilityButton(_passwordInput));
 
         _advancedOptionsButton.Text = "高级选项（域账号才需要） +";
         _advancedOptionsButton.Dock = DockStyle.Fill;
@@ -248,11 +246,13 @@ internal sealed class CredentialInputDialog : Form
     /// <param name="labelText">字段名称。</param>
     /// <param name="input">字段输入框。</param>
     /// <param name="row">表格行索引。</param>
+    /// <param name="trailingAction">可选的行尾按钮，用于在密码输入框旁切换可见性。</param>
     private static void ConfigureLabelAndInput(
         TableLayoutPanel layout,
         string labelText,
         TextBox input,
-        int row)
+        int row,
+        Button? trailingAction = null)
     {
         Label label = new()
         {
@@ -267,7 +267,21 @@ internal sealed class CredentialInputDialog : Form
         input.ForeColor = TextColor;
         input.BorderStyle = BorderStyle.FixedSingle;
         layout.Controls.Add(label, 0, row);
-        layout.Controls.Add(input, 1, row);
+        if (trailingAction is null)
+        {
+            layout.Controls.Add(input, 1, row);
+            return;
+        }
+        var field = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+        field.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        var actionColumn = new ColumnStyle(SizeType.Absolute);
+        field.ColumnStyles.Add(actionColumn);
+        DrawerMetrics.Bind(field, () => actionColumn.Width = field.LogicalToDeviceUnits(30));
+        field.Controls.Add(input, 0, 0);
+        trailingAction.Dock = DockStyle.Fill;
+        trailingAction.Margin = new Padding(0, 4, 0, 4);
+        field.Controls.Add(trailingAction, 1, 0);
+        layout.Controls.Add(field, 1, row);
     }
 
     /// <summary>

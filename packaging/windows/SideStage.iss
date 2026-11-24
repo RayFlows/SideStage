@@ -142,6 +142,8 @@ var
 begin
   Result := True;
   if not RegQueryStringValue(HKCU, UninstallKey, 'InstallLocation', InstalledDir) or (InstalledDir = '') then begin
+    { 应用内更新只允许覆盖现有安装，不能把已卸载的应用重新装回来。 }
+    if ExpandConstant('{param:SIDESTAGEUPDATE|0}') = '1' then begin Result := False; exit; end;
     Log('SideStage mode: install');
     exit;
   end;
@@ -236,4 +238,42 @@ function IsBetaOneUpgrade: Boolean;
 begin
   Result := (InstalledVersion = '0.1.0-beta.1') and (CompareText(RemoveBackslashUnlessRoot(InstalledDir),
     RemoveBackslashUnlessRoot(ExpandConstant('{app}'))) = 0);
+end;
+
+{ 读取 Windows 文件属性；清理旧翻译时绝不沿用户放置的目录联接或符号链接访问其他位置。 }
+function GetFileAttributesW(Path: String): Cardinal;
+  external 'GetFileAttributesW@kernel32.dll stdcall';
+
+{ 新版不再分发十一种未使用的框架翻译。仅在旧版原目录成功升级或重装后，逐个移除
+  旧版确实分发的四种资源文件；RemoveDir 只能删除空目录，旁边的用户文件原样保留。 }
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Root, Dir, Path: String;
+  Cultures, Names: TArrayOfString;
+  I, J: Integer;
+  FoundResource: Boolean;
+begin
+  if (CurStep <> ssPostInstall) or (InstalledDir = '') then exit;
+  if (InstalledVersion <> '0.1.0-beta.1') and (InstalledVersion <> '0.1.0-beta.2') and
+     (InstalledVersion <> '0.1.0-beta.3') and (InstalledVersion <> '0.1.0-beta.4') then exit;
+  Root := RemoveBackslashUnlessRoot(ExpandConstant('{app}'));
+  if (CompareText(RemoveBackslashUnlessRoot(InstalledDir), Root) <> 0) or
+     ((GetFileAttributesW(Root) and $400) <> 0) then exit;
+  Cultures := StringSplit('cs,de,es,fr,it,ja,ko,pl,pt-BR,ru,tr', [','], stAll);
+  Names := StringSplit('Microsoft.VisualBasic.Forms,System.Windows.Forms.Design,System.Windows.Forms.Primitives,System.Windows.Forms', [','], stAll);
+  for I := 0 to GetArrayLength(Cultures) - 1 do begin
+    Dir := AddBackslash(Root) + Cultures[I];
+    if DirExists(Dir) and ((GetFileAttributesW(Dir) and $400) = 0) then begin
+      FoundResource := False;
+      for J := 0 to GetArrayLength(Names) - 1 do begin
+        Path := AddBackslash(Dir) + Names[J] + '.resources.dll';
+        if FileExists(Path) and ((GetFileAttributesW(Path) and $400) = 0) then begin
+          FoundResource := True;
+          if not DeleteFile(Path) then Log('保留无法删除的旧翻译：' + Path);
+        end;
+      end;
+      if FoundResource then
+        if not RemoveDir(Dir) then Log('保留非空或不可删除的旧语言目录：' + Dir);
+    end;
+  end;
 end;

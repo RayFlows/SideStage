@@ -6,6 +6,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using SideStage.Core.Sessions;
+using SideStage.Windows.Platform.Windows;
 using SideStage.Windows.RemoteDesktop;
 
 namespace SideStage.App.FrameCheck;
@@ -26,9 +27,11 @@ internal static class SettingsInteractionCheck
             Require(face.Contains("HarmonyOS Sans", StringComparison.OrdinalIgnoreCase), $"{action.Text} 的 GDI 字体为 {face}");
         }
         CheckCredentialPage(window, screenshot);
+        CheckClassicPasswordField(window);
         Descendants(paper).OfType<Button>().Single(button => button.Text == "高级设置").PerformClick();
         Require(log.Visible && Descendants(window).OfType<Button>().Single(b => b.Text == "登录凭据").Visible, "侧栏设置");
-        var drawer = paper.Parent!.Controls.OfType<Panel>().Single(panel => panel.Contains(log));
+        var drawer = Descendants(window).OfType<Panel>().Single(panel => panel.Parent?.Contains(paper) == true && panel.Contains(log) && !panel.Contains(paper));
+        CheckCollapseHover(window, drawer, screenshot);
         var scaling = Descendants(drawer).OfType<ComboBox>().Single(combo => combo.AccessibleName == "画面缩放");
         var resolution = Descendants(drawer).OfType<ComboBox>().Single(combo => combo.AccessibleName == "远端分辨率");
         CheckLogInfo(window, drawer, screenshot);
@@ -117,8 +120,11 @@ internal static class SettingsInteractionCheck
         window.UpdateSessionCommands(true, true);
         Require(disconnect.Enabled && logoff.Enabled, "已核验时提供断开和注销");
         if (screenshot != null) Capture(window, Path.ChangeExtension(screenshot, "session.png"));
-        Descendants(window).OfType<Button>().Single(b => b.AccessibleName == "收起侧栏").PerformClick();
-        Require(!log.Visible && gear.Visible, "关闭侧栏后恢复齿轮");
+        var tab = Descendants(window).OfType<Button>().Single(b => b.AccessibleName == "收起侧栏");
+        Point tabCenter = tab.PointToScreen(new Point(tab.Width / 2, tab.Height / 2));
+        Require(WindowFromPoint(tabCenter) == tab.Handle, "预览上可直接点到露出的收起把手");
+        Click(tab);
+        Require(!log.Visible && !tab.Visible && gear.Visible && WindowFromPoint(tabCenter) != tab.Handle, "关闭侧栏后恢复齿轮并归还把手区域");
         window.SwitchMainView(RdpPreviewConnectionState.Disconnected);
         CheckDrag(window);
         CheckClose();
@@ -232,7 +238,7 @@ internal static class SettingsInteractionCheck
         configure.PerformClick();
         Require(Descendants(window).OfType<Button>().Any(b => b.Visible && b.Text == "保存凭据"),
             "子会话未启用时也能从首页进入凭据编辑");
-        Descendants(window).OfType<Button>().Single(b => b.Visible && b.Text == "收起侧栏").PerformClick();
+        Descendants(window).OfType<Button>().Single(b => b.Visible && b.AccessibleName == "收起侧栏").PerformClick();
         enable.PerformClick();
         Require(!enable.Visible && connect.Enabled && configure.Visible &&
             Descendants(home).OfType<Label>().Single(l => l.AccessibleName == "子会话功能状态").Text == "已启用",
@@ -284,7 +290,7 @@ internal static class SettingsInteractionCheck
     /// <summary>用测试专属的凭据库走首页与管理入口。只保存和删除测试条目，连接页通过返回退出。</summary>
     private static void CheckCredentialPage(ParchmentPreviewForm window, string? screenshot)
     {
-        Button ButtonNamed(string text) => Descendants(window).OfType<Button>().Single(b => b.Visible && b.Text == text);
+        Button ButtonNamed(string text) => Descendants(window).OfType<Button>().Single(b => b.Visible && (b.Text == text || b.AccessibleName == text));
         TextBox Field(string name) => Descendants(window).OfType<TextBox>().Single(b => b.AccessibleName == name);
         var home = Descendants(window).OfType<PaperSurface>().Single();
         var status = Descendants(home).OfType<Label>().Single(l => l.AccessibleName == "登录凭据状态");
@@ -292,7 +298,7 @@ internal static class SettingsInteractionCheck
         var configure = Descendants(home).OfType<Button>().Single(b => b.Text == "配置登录凭据");
         Require(rdp.Text == "服务和控件就绪" && status.Text == "未保存 · 建议配置", "首页显示本机远程桌面和首次填写状态");
         Descendants(home).OfType<Button>().Single(b => b.Text == "连接").PerformClick();
-        Require(Field("账户名").Visible && Field("密码").UseSystemPasswordChar, "首次连接在侧栏输入凭据");
+        Require(Field("账户名").Visible && Field("密码").PasswordChar == '\u00B7', "首次连接使用小圆点遮盖密码");
         Require(Field("账户名").Text == Environment.UserName && Field("密码").TextLength == 0 &&
             !Field("账户名").Focused && !Field("密码").Focused, "首次连接预填当前账户名，等待用户选择输入框");
         var save = Descendants(window).OfType<SettingsSwitch>().Single(s => s.Text == "保存到本机");
@@ -300,6 +306,18 @@ internal static class SettingsInteractionCheck
         Field("密码").Text = "frame-check-discard";
         var password = Field("密码");
         password.Focus();
+        password.Select(2, 4);
+        var eye = ButtonNamed("显示密码");
+        Require(password.Right < eye.Left && password.Parent == eye.Parent, "眼睛位于密码输入框右侧");
+        Click(eye);
+        Require(password.PasswordChar == '\0' && eye.AccessibleName == "隐藏密码" && password.Text == "frame-check-discard" &&
+            password.SelectionStart == 2 && password.SelectionLength == 4, "显示密码保留原文和选区");
+        eye.PerformClick();
+        Require(password.PasswordChar == '\u00B7' && eye.AccessibleName == "显示密码" && password.Text == "frame-check-discard",
+            "再次点击恢复小圆点遮盖");
+        password.Select(password.TextLength, 0);
+        if (screenshot != null) Capture(window, Path.ChangeExtension(screenshot, "password-masked.png"));
+        eye.PerformClick();
         Click(Descendants(window).OfType<Label>().Single(label => label.Visible && !home.Contains(label) && label.Text == "登录凭据"));
         Require(!password.Focused && password.TextLength > 0, "点击侧栏标题退出编辑并保留草稿");
         password.Focus();
@@ -309,7 +327,8 @@ internal static class SettingsInteractionCheck
         Require(password.Focused, "再次点击输入区即可继续编辑");
         Descendants(window).OfType<Button>().Single(b => b.AccessibleName == "返回高级设置").PerformClick();
         ButtonNamed("登录凭据").PerformClick();
-        Require(Field("密码").TextLength == 0 && !Field("所属域").Visible, "返回后清空草稿且默认收起域");
+        Require(Field("密码").TextLength == 0 && Field("密码").PasswordChar == '\u00B7' && !Field("所属域").Visible,
+            "重新进入时清空草稿、遮盖密码并收起域");
         CheckHover(Field("密码").Parent!);
         Field("密码").Text = "frame-check-close";
         ButtonNamed("收起侧栏").PerformClick();
@@ -342,6 +361,24 @@ internal static class SettingsInteractionCheck
         ButtonNamed("收起侧栏").PerformClick();
     }
 
+    /// <summary>经典窗口共用相同的遮盖和眼睛按钮。使用独立的测试目标名，仅在编辑器内切换显示。</summary>
+    private static void CheckClassicPasswordField(Form owner)
+    {
+        var vault = new WindowsChildSessionCredentialStore($"SideStage.FrameCheck.{Guid.NewGuid():N}");
+        using CredentialInputDialog dialog = new(vault);
+        dialog.Show(owner);
+        var eye = Descendants(dialog).OfType<PasswordVisibilityButton>().Single();
+        var field = eye.Parent!.Controls.OfType<TextBox>().Single();
+        Require(field.PasswordChar == '\u00B7' && eye.Left >= field.Right && eye.Width > 0,
+            "经典凭据窗口在小圆点密码框右侧显示眼睛");
+        field.Text = "classic-fixture";
+        eye.PerformClick();
+        Require(field.PasswordChar == '\0' && field.Text == "classic-fixture", "经典窗口可查看本次输入");
+        field.Clear();
+        Require(field.PasswordChar == '\u00B7' && eye.AccessibleName == "显示密码", "清空后再次输入仍默认遮盖");
+        dialog.Close();
+    }
+
     /// <summary>在最小窗口操作真实页面，核对系统滚动条裁切、滚轮、拖动、键盘导航和固定日志的位置。</summary>
     private static void CheckPageScroll(Form window, Button last, string? screenshot, string captureName)
     {
@@ -350,7 +387,7 @@ internal static class SettingsInteractionCheck
         try
         {
             window.Size = window.MinimumSize;
-            var page = Descendants(window).OfType<PaperScrollPage>().Single(p => p.Visible);
+            var page = Descendants(window).OfType<PaperScrollPage>().Single(p => p.Visible && p.Contains(last));
             var viewport = Descendants(page).OfType<Panel>().Single(p => p.AutoScroll);
             Control clip = viewport.Parent!;
             viewport.AutoScrollPosition = Point.Empty;
@@ -368,8 +405,9 @@ internal static class SettingsInteractionCheck
             SendMessage(page.Handle, 0x0200, 1, bottom);
             SendMessage(page.Handle, 0x0202, 0, bottom);
             Rectangle visible = clip.RectangleToScreen(clip.ClientRectangle);
-            Require(-viewport.AutoScrollPosition.Y == viewport.DisplayRectangle.Height - viewport.ClientSize.Height &&
-                visible.Contains(last.RectangleToScreen(last.ClientRectangle)), "拖到末端时最后一个操作完整可见");
+            // 末端可能是版本说明；可聚焦的最后一个按钮在下方的键盘步骤另行验证。
+            Require(-viewport.AutoScrollPosition.Y == viewport.DisplayRectangle.Height - viewport.ClientSize.Height,
+                "拖动设置滑块可以到达内容末端");
             Require(!page.Capture && frame.RectangleToScreen(frame.ClientRectangle) == fixedLog, "松开滑块后释放捕获且日志位置固定");
             if (screenshot != null) Capture(window, Path.ChangeExtension(screenshot, $"{captureName}.png"));
             // 由首页第一项依 Tab 顺序前进，屏外的操作获得焦点时必须被滚入视口。
@@ -382,9 +420,13 @@ internal static class SettingsInteractionCheck
             }
             Require(last.Focused && visible.Contains(last.RectangleToScreen(last.ClientRectangle)),
                 $"键盘可进入末端操作并显示整行（当前焦点 {Control.FromHandle(GetFocus())?.AccessibleName}，末项 {last.RectangleToScreen(last.ClientRectangle)}，视口 {visible}）");
-            window.Height += viewport.DisplayRectangle.Height - viewport.ClientSize.Height + 80;
+            // 放大时日志框也会增长，因此按日志完整高度预留空间，再验证滚动条退出。
+            window.Height += viewport.DisplayRectangle.Height - viewport.ClientSize.Height + window.LogicalToDeviceUnits(136);
             Wait(60);
-            Require(!viewport.VerticalScroll.Visible && clip.Width == page.ClientSize.Width, "放大后滑块消失并还原页面宽度");
+            bool overflow = viewport.Controls[0].Height > viewport.ClientSize.Height;
+            Require(viewport.VerticalScroll.Visible == overflow &&
+                clip.Width == page.ClientSize.Width - (overflow ? page.LogicalToDeviceUnits(12) : 0),
+                $"放大后按实际内容分配滑块位置（内容 {viewport.Controls[0].Height}，视口 {viewport.ClientSize.Height}）");
         }
         finally { window.Size = original; }
     }
@@ -410,6 +452,49 @@ internal static class SettingsInteractionCheck
             Color before = idle.GetPixel(0, 0), after = hovered.GetPixel(0, 0);
             Require(before.G - after.G >= 16 && before == restored.GetPixel(0, 0),
                 $"{button.Text} 悬停时按钮加深，移出后恢复原色");
+        }
+        finally { Cursor.Position = original; }
+    }
+
+    /// <summary>分别经过分隔线两边的半圆，核对圆面反馈、圆外透底和移出后的提示状态。</summary>
+    private static void CheckCollapseHover(Form window, Control drawer, string? screenshot)
+    {
+        var tab = Descendants(window).OfType<DrawerCollapseTab>().Single();
+        Point original = Cursor.Position;
+        Rectangle bounds = tab.RectangleToScreen(tab.ClientRectangle);
+        int center = drawer.PointToScreen(Point.Empty).X - bounds.Left;
+        int sampleY = tab.Height / 4;
+        Point outside = new(tab.Width - 2, 1);
+        Point away = new(bounds.Left - tab.LogicalToDeviceUnits(15), bounds.Top);
+        try
+        {
+            Cursor.Position = away;
+            Wait(80);
+            using Bitmap idle = CaptureArea(bounds);
+            Color idleFace = idle.GetPixel(center, sampleY);
+            Require(idleFace.G - drawer.BackColor.G >= 10 && idleFace.G - tab.FlatAppearance.MouseOverBackColor.G >= 10 &&
+                idle.GetPixel(outside.X, outside.Y).ToArgb() == drawer.BackColor.ToArgb(), "常态圆钮与侧栏纸色可区分，圆外显示侧栏原色");
+            if (screenshot != null) Capture(window, Path.ChangeExtension(screenshot, "collapse-idle.png"));
+            foreach (int x in new[] { tab.Width / 4, tab.Width * 3 / 4 })
+            {
+                Cursor.Position = new Point(bounds.Left + x, bounds.Top + bounds.Height / 2);
+                Wait(80);
+                using Bitmap hovered = CaptureArea(bounds);
+                Require(hovered.GetPixel(center - 2, sampleY).ToArgb() == tab.FlatAppearance.MouseOverBackColor.ToArgb() &&
+                    hovered.GetPixel(center + 2, sampleY).ToArgb() == tab.FlatAppearance.MouseOverBackColor.ToArgb() &&
+                    hovered.GetPixel(outside.X, outside.Y) == idle.GetPixel(outside.X, outside.Y) &&
+                    WindowFromPoint(tab.PointToScreen(outside)) != tab.Handle, "两侧半圆同色高亮，圆外保留原色与原命中窗口");
+            }
+            Wait(SystemInformation.MouseHoverTime + 200);
+            var popup = Control.FromChildHandle(WindowFromPoint(new Point(bounds.Left, bounds.Bottom + tab.LogicalToDeviceUnits(16))));
+            while (popup != null && popup is not PaperHintBubble) popup = popup.Parent;
+            Require(popup is PaperHintBubble { Visible: true }, "停留后把手左下方显示纸面提示");
+            if (screenshot != null) Capture(window, Path.ChangeExtension(screenshot, "collapse-hover.png"));
+            Cursor.Position = away;
+            Wait(80);
+            using Bitmap restored = CaptureArea(bounds);
+            Require(!popup!.Visible && restored.GetPixel(center, sampleY) == idleFace,
+                "移出后提示收起，圆钮恢复浅纸色");
         }
         finally { Cursor.Position = original; }
     }
@@ -486,7 +571,7 @@ internal static class SettingsInteractionCheck
     }
 
     /// <summary>截取真实桌面合成帧，保留内框、字体与控件显示位置供核对。</summary>
-    private static void Capture(Form window, string path)
+    internal static void Capture(Form window, string path)
     {
         window.Refresh();
         using Bitmap image = CaptureArea(window.Bounds);

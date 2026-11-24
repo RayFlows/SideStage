@@ -65,6 +65,31 @@ public sealed class ChildSessionPreviewControlTests
     }
 
     /// <summary>
+    /// 验证窗口化预览在发起连接前就已将 Windows 快捷键定向到分身。
+    /// 读取本机 ActiveX 的实际配置，覆盖默认仅在全屏时转发快捷键的回归。
+    /// </summary>
+    [STATestMethod]
+    public void PreparePreview_RoutesWindowsShortcutsToWindowedChildSession()
+    {
+        using ChildSessionPreviewControl control = new();
+        control.PreparePreview();
+
+        object activeX = InvokePrivateMethod(control, "GetActiveXOrThrow")
+            ?? throw new AssertFailedException("RDP ActiveX 未创建。");
+        object securedSettings = InvokeStaticPrivateMethod(control, "GetComProperty", activeX, "SecuredSettings2")
+            ?? throw new AssertFailedException("RDP ActiveX 未提供 SecuredSettings2。");
+        object? mode = InvokeStaticPrivateMethod(control, "GetComProperty", securedSettings, "KeyboardHookMode");
+        Assert.AreEqual(1, Convert.ToInt32(mode, System.Globalization.CultureInfo.InvariantCulture),
+            "窗口化预览获得焦点时，Alt+Tab 和 Win 应交由子会话处理。");
+        object advancedSettings = InvokeStaticPrivateMethod(control, "GetComProperty", activeX, "AdvancedSettings9")
+            ?? throw new AssertFailedException("RDP ActiveX 未提供 AdvancedSettings9。");
+        object? windowsKey = InvokeStaticPrivateMethod(control, "GetComProperty", advancedSettings, "EnableWindowsKey");
+        Assert.IsTrue(Convert.ToBoolean(windowsKey, System.Globalization.CultureInfo.InvariantCulture),
+            "子会话应能接收 Windows 键。");
+        Assert.AreEqual(RdpPreviewConnectionState.Disconnected, control.GetConnectionState());
+    }
+
+    /// <summary>
     /// 验证调用方可显式选择把分身声音转发到本机，而不发起连接。
     /// </summary>
     [STATestMethod]

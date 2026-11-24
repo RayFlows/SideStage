@@ -5,6 +5,7 @@
  * 生命周期：只在本次拖动中持有位图和鼠标穿透的图层。调用方负责在切换页面或结束拖动时释放。
  */
 using System.ComponentModel;
+using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 
 namespace SideStage.App;
@@ -17,13 +18,15 @@ internal sealed class HomeResizeSurface : NativeWindow, IDisposable
     private Dib? _output;
     private readonly int _header, _footer, _buttonLeft, _radius;
     private readonly Rectangle _table, _drawerBounds;
+    private readonly Point _drawerOrigin;
+    private readonly Rectangle[] _drawerParts = [];
     private readonly Size _padding;
     private readonly Dib? _drawer;
     private Rectangle _last;
     private bool _shown;
 
     /// <summary>按当前 DPI 捕获首页。四角的半透明覆盖率与常规铜框使用同一套几何。</summary>
-    internal HomeResizeSurface(Form host, Control table, int buttonLeft, Control? drawer)
+    internal HomeResizeSurface(Form host, Control table, int buttonLeft, Control? drawer, DrawerCollapseTab? tab)
     {
         _table = new(host.PointToClient(table.PointToScreen(Point.Empty)), table.Size);
         _padding = host.Padding.Size;
@@ -35,15 +38,27 @@ internal sealed class HomeResizeSurface : NativeWindow, IDisposable
         try
         {
             if (!PrintWindow(host.Handle, _original.Dc, 3)) throw new Win32Exception();
-            if (drawer is not null)
+            if (drawer is not null && tab is not null)
             {
                 // 展宽窗口可能露出原先被抽屉遮住的表格。分别保留抽屉和完整纸页，再按新位置合成。
                 _drawerBounds = new(host.PointToClient(drawer.PointToScreen(Point.Empty)), drawer.Size);
-                _drawer = new Dib(drawer.Size);
-                _drawer.CopyFrom(_original, _drawerBounds, Point.Empty);
+                Rectangle tabBounds = new(host.PointToClient(tab.PointToScreen(Point.Empty)), tab.Size);
+                Rectangle capture = Rectangle.Union(_drawerBounds, tabBounds);
+                _drawerOrigin = capture.Location;
+                _drawer = new Dib(capture.Size);
+                _drawer.CopyFrom(_original, capture, Point.Empty);
                 _drawer.ApplyCornerAlpha(0);
-                Control paper = table.Parent!;
-                using Dib cleanPaper = new(paper.ClientSize);
+                // 仅复制侧栏和把手的实体轮廓。把手两角及上下方始终显示新位置的纸纹或首页控件。
+                using Region outline = tab.Region?.Clone() ?? new Region(tab.ClientRectangle);
+                outline.Translate(tabBounds.Left - capture.Left, tabBounds.Top - capture.Top);
+                using Matrix identity = new();
+                outline.Union(new Rectangle(_drawerBounds.Location - (Size)capture.Location, _drawerBounds.Size));
+                _drawerParts = outline.GetRegionScans(identity).Select(Rectangle.Round).ToArray();
+                PaperSurface paper = (PaperSurface)table.Parent!;
+                using Dib cleanPaper = new(host.ClientSize - host.Padding.Size);
+                // 抽屉打开后真实纸页仅占左侧。合成底图仍需在被抽屉盖住的位置保留空白纸纹。
+                using (Graphics graphics = Graphics.FromHdc(cleanPaper.Dc))
+                    paper.PaintBlankMargin(graphics, new Rectangle(Point.Empty, cleanPaper.Size));
                 // WM_PRINT 让纸页和它自己的子控件直接绘制，即使其中一部分在屏幕上被同级抽屉盖住。
                 const int print = 0x0317, client = 0x04, background = 0x08, children = 0x10;
                 SendMessage(paper.Handle, print, cleanPaper.Dc, client | background | children);
@@ -89,8 +104,11 @@ internal sealed class HomeResizeSurface : NativeWindow, IDisposable
         FillPaper(centeredTop + _table.Height, bounds.Height - _footer);
         CopyBand(original.Height - _footer, bounds.Height - _footer, _footer);
         if (_drawer != null)
-            _output.CopyFrom(_drawer, new Rectangle(Point.Empty, _drawer.Size),
-                new Point(_drawerBounds.X + bounds.Width - original.Width, _drawerBounds.Y));
+        {
+            int left = _drawerOrigin.X + bounds.Width - original.Width;
+            foreach (Rectangle part in _drawerParts)
+                _output.CopyFrom(_drawer, part, new Point(left + part.X, _drawerOrigin.Y + part.Y));
+        }
         Point destination = bounds.Location, source = Point.Empty;
         Size size = bounds.Size;
         uint blend = 0x01ff0000;

@@ -1,0 +1,7 @@
+<!-- 文件职责：构建独立的当前用户更新进程；正式打包为自包含单文件，不引用桌面、RDP 或凭据库。 -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <ApplicationIcon>../../assets/branding/SideStage.ico</ApplicationIcon>
+  </PropertyGroup>
+</Project>

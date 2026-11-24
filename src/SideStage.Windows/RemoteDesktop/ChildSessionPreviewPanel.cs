@@ -47,6 +47,16 @@ public sealed class ChildSessionPreviewPanel : Panel
     public ChildSessionPreviewPanel(
         ChildSessionPreviewSettings settings,
         ChildSessionAudioMode audioMode = ChildSessionAudioMode.DoNotPlay)
+        : this(settings, audioMode, null)
+    {
+    }
+
+    /// <summary>允许宿主装饰原生滚动面板。包装控件负责视口尺寸，远端像素与输入坐标仍由预览库管理。</summary>
+    /// <param name="settings">远端尺寸和缩放选项。</param>
+    /// <param name="audioMode">本次连接的播放策略。</param>
+    /// <param name="wrapViewport">将传入的面板装入宿主控件并返回该控件。传入空值时使用系统滚动条。</param>
+    public ChildSessionPreviewPanel(ChildSessionPreviewSettings settings, ChildSessionAudioMode audioMode,
+        Func<Panel, Control>? wrapViewport)
     {
         ArgumentNullException.ThrowIfNull(settings);
         BackColor = Color.FromArgb(12, 14, 16);
@@ -65,7 +75,11 @@ public sealed class ChildSessionPreviewPanel : Panel
         };
 
         _previewSurface.Controls.Add(PreviewControl);
-        Controls.Add(_previewSurface);
+        Control host = wrapViewport?.Invoke(_previewSurface) ?? _previewSurface;
+        if (host != _previewSurface && !host.Contains(_previewSurface))
+            throw new ArgumentException("视口必须包含传入的滚动面板。", nameof(wrapViewport));
+        host.Dock = DockStyle.Fill;
+        Controls.Add(host);
 
         Controls.Add(_cover);
         _cover.BringToFront();
@@ -207,7 +221,6 @@ public sealed class ChildSessionPreviewPanel : Panel
             return;
         }
 
-        _previewSurface.Bounds = ClientRectangle;
         ChildSessionPreviewSettings settings = Settings;
         Size source = settings.Resolution.ToSize();
         Rectangle viewport;

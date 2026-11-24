@@ -20,6 +20,8 @@
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="SideStage.UpdateRepository" Value="$(SideStageUpdateRepository)" />
+    <AssemblyMetadata Include="SideStage.CnbRepository" Value="$(SideStageCnbRepository)" />
+    <AssemblyMetadata Include="SideStage.UpdatePublicKey" Value="$(SideStageUpdatePublicKey)" />
     <InternalsVisibleTo Include="SideStage.App.Tests" />
     <PackageReference Include="Svg" Version="3.4.8" />
     <PackageReference Include="System.Management" Version="10.0.11" />
@@ -29,6 +31,8 @@
     <Content Include="Artwork/Fonts/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <EmbeddedResource Include="$(ApplicationIcon)" LogicalName="SideStage.App.SideStage.ico" />
     <EmbeddedResource Include="Artwork/SettingsGear.png" LogicalName="SideStage.App.SettingsGear.png" />
+    <EmbeddedResource Include="Artwork/UpdateSources/*.svg" LogicalName="SideStage.App.UpdateSources.%(Filename)%(Extension)" />
+    <Content Include="Artwork/UpdateSources/NOTICE.txt" Link="Licenses/UpdateSources.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <InternalsVisibleTo Include="SideStage.App.FrameCheck" />
     <ProjectReference Include="../SideStage.Core/SideStage.Core.csproj" />
     <ProjectReference Include="../SideStage.Windows/SideStage.Windows.csproj" />

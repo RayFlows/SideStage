@@ -1,14 +1,14 @@
 /*
- * 文件职责：在高级设置显示当前版本、启动检查选项和检查结果；有更新时由用户决定是否打开发布页。
- * 生命周期：后台检查不抢焦点，关闭窗体取消请求；任何更新动作均不操作 RDP 或 Windows 登录凭据。
- * 持久化：仅在用户切换开关时写入当前用户的一项首选项，不创建后台服务或计划任务。
+ * 文件职责：管理启动检查与手动检查、更新窗口、版本跳过偏好和退出交接；联网能力只属于桌面应用。
+ * 生命周期：连接期间延后主动提示；明确同意后只断开 RDP，绝不借普通关闭流程注销子会话。
+ * 持久化：当前用户可关闭启动检查或跳过单一版本，不创建后台服务或计划任务。
  */
 using Microsoft.Win32;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Net.Http;
 using System.Security;
 using System.Text.Json;
+using SideStage.Windows.RemoteDesktop;
 
 namespace SideStage.App;
 
@@ -16,7 +16,8 @@ internal sealed partial class ParchmentPreviewForm
 {
     private const string UpdatePreferenceKey = @"Software\SideStage";
     private const string StartupPreferenceName = "CheckUpdatesOnStartup";
-    private readonly GitHubUpdateFeed _updates = GitHubUpdateFeed.FromBuild();
+    private readonly ReleaseUpdateFeed _updates;
+    private readonly string _updatePreferenceKey;
     private readonly CancellationTokenSource _updateLifetime = new();
     private SettingsActionRow? _checkUpdates;
     private SettingsSwitch? _startupUpdates;
@@ -24,6 +25,8 @@ internal sealed partial class ParchmentPreviewForm
     private Button? _homeSettings;
     private ReleaseOffer? _updateOffer;
     private bool _checkingUpdates;
+    private bool _pendingUpdatePrompt, _preparingUpdate, _exitingForUpdate;
+    private ReleaseUpdateWindow? _updateWindow;
 
     /// <summary>复用现有设置行。离线试装版仍可查看当前版本，但不提供不能完成的联网操作。</summary>
     private void AddUpdateSettings(TableLayoutPanel options)
@@ -45,11 +48,11 @@ internal sealed partial class ParchmentPreviewForm
     }
 
     /// <summary>仅在正规发布构建中读取用户偏好。首次默认检查；系统拒绝读取时不主动联网。</summary>
-    private static bool ReadStartupPreference()
+    private bool ReadStartupPreference()
     {
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(UpdatePreferenceKey);
+            using var key = Registry.CurrentUser.OpenSubKey(_updatePreferenceKey);
             return key?.GetValue(StartupPreferenceName) is not 0;
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or SecurityException) { return false; }
@@ -58,9 +61,10 @@ internal sealed partial class ParchmentPreviewForm
     /// <summary>按用户操作写入开关，持久化失败时在同一区域说明，不影响当前会话。</summary>
     private void SaveStartupPreference(object? sender, EventArgs e)
     {
+        if (_startupUpdates?.Checked != true) _pendingUpdatePrompt = false;
         try
         {
-            using var key = Registry.CurrentUser.CreateSubKey(UpdatePreferenceKey);
+            using var key = Registry.CurrentUser.CreateSubKey(_updatePreferenceKey);
             key.SetValue(StartupPreferenceName, _startupUpdates!.Checked ? 1 : 0, RegistryValueKind.DWord);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or SecurityException)
@@ -69,17 +73,15 @@ internal sealed partial class ParchmentPreviewForm
         }
     }
 
-    /// <summary>只在用户点击已发现的更新时打开固定仓库的发布说明页，不调用安装程序。</summary>
+    /// <summary>手动检查不受「跳过此版本」影响，再次打开现有窗口会保留其下载进度。</summary>
     private async void OpenOrCheckUpdate(object? sender, EventArgs e)
     {
         if (_updateOffer == null) { await CheckUpdatesAsync(); return; }
-        try { using var browser = Process.Start(new ProcessStartInfo(_updateOffer.Page.AbsoluteUri) { UseShellExecute = true }); }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
-        { SetUpdateStatus("无法打开默认浏览器，请稍后重试。"); }
+        ShowUpdateOffer(_updateOffer);
     }
 
     /// <summary>单窗口同一时刻只发起一次检查。超时、断网或频道数据不完整都不会被当作最新版。</summary>
-    private async Task CheckUpdatesAsync()
+    private async Task CheckUpdatesAsync(bool startup = false)
     {
         if (_checkingUpdates || !_updates.IsConfigured || _checkUpdates == null) return;
         _checkingUpdates = true;
@@ -92,10 +94,16 @@ internal sealed partial class ParchmentPreviewForm
             if (token.IsCancellationRequested) return;
             _updateOffer = offer;
             if (offer == null) { SetUpdateStatus("未发现可用的新版本。"); return; }
-            _checkUpdates.Text = "查看更新并下载";
+            _checkUpdates.Text = "查看可用更新";
             if (_homeSettings != null) _homeSettings.Text = "设置 · 有更新";
             SetUpdateStatus($"可更新至 {offer.Version.Text}。");
-            AppendLog($"发现 SideStage {offer.Version.Text}。可在高级设置中查看发布说明。");
+            AppendLog($"发现 SideStage {offer.Version.Text}。");
+            if (!startup) ShowUpdateOffer(offer);
+            else if (_startupUpdates?.Checked == true && !IsSkipped(offer.Version.Text))
+            {
+                _pendingUpdatePrompt = true;
+                TryPresentStartupUpdate();
+            }
         }
         catch (Exception ex) when (ex is OperationCanceledException or HttpRequestException or JsonException or InvalidDataException or IOException)
         {
@@ -113,5 +121,100 @@ internal sealed partial class ParchmentPreviewForm
     {
         if (_updateStatus != null) _updateStatus.Text = $"当前版本：{_updates.Current.Text}" +
             (status.Length == 0 ? "" : Environment.NewLine + status);
+    }
+
+    /// <summary>只为自动检查读取被跳过的精确版本；注册表不可读时不主动弹窗打扰用户。</summary>
+    private bool IsSkipped(string version)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(_updatePreferenceKey);
+            return Equals(key?.GetValue("SkippedUpdate"), version);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or SecurityException) { return true; }
+    }
+
+    /// <summary>推迟迟到的联网结果，直到用户回到本窗口且没有正在使用的远程桌面。</summary>
+    private void TryPresentStartupUpdate()
+    {
+        if (!_pendingUpdatePrompt || _updateOffer == null || ActiveForm != this || !Enabled ||
+            WindowState == FormWindowState.Minimized || _confirmingClose || UpdateConnectionActive()) return;
+        ShowUpdateOffer(_updateOffer);
+    }
+
+    /// <summary>更新只需知道是否可能影响预览，不查询登录身份、不核验也不注销子会话。</summary>
+    private bool UpdateConnectionActive() => _audioReconnect.Active || (_rdpPrepared &&
+        _previewPanel.PreviewControl.GetConnectionState() != RdpPreviewConnectionState.Disconnected);
+
+    /// <summary>使用非模态的自有更新窗口。关闭窗口或下载完成不会触发安装。</summary>
+    private void ShowUpdateOffer(ReleaseOffer offer)
+    {
+        _pendingUpdatePrompt = false;
+        _updateWindow ??= new(_updates.Current, offer,
+            (source, progress, cancel) => new UpdateDownload().FetchAsync(offer, source, _updates.SigningKey, progress, cancel),
+            InstallUpdateAsync, () =>
+            {
+                try { using var key = Registry.CurrentUser.CreateSubKey(_updatePreferenceKey); key.SetValue("SkippedUpdate", offer.Version.Text); }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or SecurityException)
+                { SetUpdateStatus("本次已跳过，未能保存到下次启动。"); }
+            }, _updateLifetime.Token);
+        if (!_updateWindow.Visible)
+        {
+            _updateWindow.StartPosition = FormStartPosition.Manual;
+            _updateWindow.Location = new Point(Left + Math.Max(0, (Width - _updateWindow.Width) / 2),
+                Top + Math.Max(0, (Height - _updateWindow.Height) / 2));
+            _updateWindow.Show(this);
+        }
+        _updateWindow.Activate();
+    }
+
+    /// <summary>等待更新器就绪后再断开；若取消、断开超时或关闭被否决，管道不提交，安装便不会开始。</summary>
+    private async Task InstallUpdateAsync(VerifiedUpdate update)
+    {
+        if (_preparingUpdate) return;
+        _preparingUpdate = true;
+        try
+        {
+            Enabled = false;
+            using var handoff = await UpdateHandoff.PrepareAsync(update, _updateLifetime.Token);
+            if (UpdateConnectionActive())
+            {
+                var decision = MessageBox.Show(_updateWindow, "仅断开 RDP 连接并更新 SideStage？\n\n不会注销子会话。选「否」可继续使用当前连接。",
+                    "断开连接并更新", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+                if (decision != DialogResult.Yes) return;
+            }
+            var preview = _previewPanel.PreviewControl;
+            await DisconnectForUpdateAsync(_audioReconnect.Cancel,
+                () => _rdpPrepared && preview.GetConnectionState() != RdpPreviewConnectionState.Disconnected,
+                preview.DisconnectPreview, _updateLifetime.Token);
+            _exitingForUpdate = true;
+            Close();
+            if (!IsDisposed) throw new InvalidOperationException("窗口未退出，已取消安装。");
+            try { handoff.Commit(); }
+            catch (IOException)
+            {
+                // 原窗口已退出，不能再用其状态标签报告管道失败。
+                MessageBox.Show("更新器提前退出，未能提交安装请求。请重新打开 SideStage 后重试。", "SideStage 更新",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+        finally
+        {
+            _preparingUpdate = _exitingForUpdate = false;
+            if (!IsDisposed) Enabled = true;
+        }
+    }
+
+    /// <summary>停止音频自动重连，仅请求 ActiveX 断开并等待其确认；不调用任何会话终止接口。</summary>
+    internal static async Task DisconnectForUpdateAsync(Func<bool> cancelReconnect, Func<bool> connected,
+        Action disconnect, CancellationToken lifetime)
+    {
+        lifetime.ThrowIfCancellationRequested();
+        bool alreadyRequested = cancelReconnect();
+        if (!alreadyRequested && connected()) disconnect();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
+        timeout.CancelAfter(TimeSpan.FromSeconds(12));
+        while (connected())
+            await Task.Delay(100, timeout.Token);
     }
 }

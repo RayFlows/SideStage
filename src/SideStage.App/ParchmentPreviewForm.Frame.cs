@@ -258,7 +258,8 @@ internal sealed partial class ParchmentPreviewForm
             e.Graphics.DrawIcon(_captionIcon, new Rectangle(title.Left, title.Top + (title.Height - iconSize) / 2, iconSize, iconSize));
             title = Rectangle.FromLTRB(title.Left + iconSize + LogicalToDeviceUnits(4), title.Top, title.Right, title.Bottom);
         }
-        TextRenderer.DrawText(e.Graphics, Text, _labelFont ?? Font, title, CardLight,
+        // 取与标题同字级的实际控件字体，运行中切换显示器后仍与标题栏图标保持比例。
+        TextRenderer.DrawText(e.Graphics, Text, _checkRdpIcon?.Font ?? _labelFont ?? Font, title, CardLight,
             TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
     }
 
@@ -374,16 +375,17 @@ internal sealed partial class ParchmentPreviewForm
         if (!widthChanged && !heightChanged) return;
         Point origin = (next.Flags & NoMove) != 0 ? Location : new(next.X, next.Y);
         Rectangle target = new(origin, new Size(next.Width, next.Height));
-        PaperSurface? paper = _centerCard as PaperSurface;
+        PaperSurface? paper = _homePaper;
         Control? drawer = _settingsDrawer?.Visible == true ? _settingsDrawer : null;
-        bool canPresentHome = paper?.Visible == true && paper.Controls.Count == 1 && _minimizeButton != null &&
+        bool unclippedPaper = paper?.Visible == true && !paper.HorizontalScroll.Visible && !paper.VerticalScroll.Visible;
+        bool canPresentHome = unclippedPaper && paper!.Controls.Count == 1 && _minimizeButton != null &&
             (drawer == null || !heightChanged);
         if (!_homeCaptureFailed && canPresentHome)
         {
             if (message.Msg != WindowPositionChanging && _homeSurface != null) return;
             try
             {
-                _homeSurface ??= new HomeResizeSurface(this, paper!.Controls[0], _minimizeButton!.Left, drawer);
+                _homeSurface ??= new HomeResizeSurface(this, paper!.Controls[0], _minimizeButton!.Left, drawer, _drawerTab);
                 if (_homeSurface.Present(target))
                 {
                     // 透明度保留一个灰阶，原窗口仍接收系统拖边；旧几何不会透出临时窗的透明圆角。
@@ -410,7 +412,7 @@ internal sealed partial class ParchmentPreviewForm
         }
         if (message.Msg == WindowPositionChanging && next.Height < _frameGeometry.Size.Height) return;
         int paperDepth = 0;
-        if (paper?.Visible == true && _settingsDrawer?.Visible == false && paper.Controls.Count == 1)
+        if (unclippedPaper && _settingsDrawer?.Visible == false && paper!.Controls.Count == 1)
         {
             // 首页的表格垂直居中。即使高 DPI 下空白已不足，也不能盖住最后一行按钮。
             int tableHeight = paper.Controls[0].Height;

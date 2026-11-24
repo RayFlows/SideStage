@@ -13,7 +13,7 @@ $ErrorActionPreference = 'Stop'
 $root = (Get-Item -LiteralPath "$PSScriptRoot/../..").FullName
 $compiler = (Get-Command $Iscc -CommandType Application).Source
 $id = [guid]::NewGuid().ToString().ToUpperInvariant()
-$run = Join-Path $root "artifacts/wizard-tests/$id"
+$run = Join-Path $root "artifacts/checks/wizard/$id"
 $dir = Join-Path $run 'installed'
 $payload = Join-Path $run 'fixture'
 $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{$id}_is1"
@@ -55,11 +55,25 @@ function Test-Mode([string] $Name, [string] $Version, [string] $Mode, [string] $
 
 try {
     Test-Mode '首次安装' '0.1.0-beta.2' 'install' '0.1.0-beta.2' $true
+    # 模拟旧版留下的 WinForms 翻译。仅程序原有文件可被清理，用户文件和中文包必须保留。
+    foreach ($name in 'cs','de','zh-Hans') {
+        $null = New-Item -ItemType Directory -Path (Join-Path $dir $name)
+        Copy-Item -LiteralPath $icon -Destination (Join-Path $dir "$name/System.Windows.Forms.resources.dll")
+    }
+    Copy-Item -LiteralPath $icon -Destination (Join-Path $dir 'de/keep.txt')
+    $null = New-Item -ItemType Directory -Path "$dir/es","$run/user-files"
+    Copy-Item -LiteralPath $icon -Destination "$run/user-files/System.Windows.Forms.resources.dll"
+    $null = New-Item -ItemType Junction -Path "$dir/fr" -Target "$run/user-files"
     # 占用文件时，升级应在写入前停止，仍保持原版本。
     $lock = [IO.File]::OpenRead((Join-Path $dir 'SideStage.exe'))
     try { Test-Mode '文件占用' '0.1.0-beta.10' 'update' '0.1.0-beta.2' $false }
     finally { $lock.Dispose() }
     Test-Mode '向前升级' '0.1.0-beta.10' 'update' '0.1.0-beta.10' $true
+    if ((Test-Path -LiteralPath "$dir/cs") -or (Test-Path -LiteralPath "$dir/de/System.Windows.Forms.resources.dll") -or
+        !(Test-Path -LiteralPath "$dir/de/keep.txt") -or !(Test-Path -LiteralPath "$dir/zh-Hans/System.Windows.Forms.resources.dll") -or
+        !(Test-Path -LiteralPath "$dir/es" -PathType Container) -or !(Test-Path -LiteralPath "$dir/fr/System.Windows.Forms.resources.dll")) {
+        throw '覆盖升级未精确迁移旧语言目录。'
+    }
     Test-Mode '同版重装' '0.1.0-beta.10' 'reinstall' '0.1.0-beta.10' $true
     Test-Mode '拒绝降级' '0.1.0-beta.2' 'blocked (Downgrade)' '0.1.0-beta.10' $false
 }

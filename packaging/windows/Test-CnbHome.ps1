@@ -3,12 +3,12 @@
     用本地 Git 仓库验收国内下载首页，不访问 GitHub、CNB，也不使用真实的发布令牌。
 .DESCRIPTION
     验证首次创建、重复执行、新版本、补发旧版本和手工分支保护。测试现场保留在忽略提交的
-    artifacts/cnb-home-tests 下，可检查源码树、提交父链和工作区未提交文件。
+    artifacts/checks/cnb-home 下，可检查源码树、提交父链和工作区未提交文件。
 #>
 #requires -Version 7.4
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
-$root = Join-Path "$PSScriptRoot/../../artifacts/cnb-home-tests" ([guid]::NewGuid().ToString('N'))
+$root = Join-Path "$PSScriptRoot/../../artifacts/checks/cnb-home" ([guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Force -Path $root
 $root = (Resolve-Path $root).Path
 $origin = Join-Path $root 'origin'

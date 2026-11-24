@@ -52,6 +52,11 @@ $null = New-Item -ItemType Directory -Path $stage
 try {
     $gh = Invoke-RestMethod -Uri "https://api.github.com/repos/$GitHubRepository/releases/tags/$Tag" -Headers $headers -TimeoutSec 30
     if ($gh.tag_name -cne $Tag -or $gh.draft -ne $false -or ($version.Contains('-') -and !$gh.prerelease)) { throw 'GitHub 标签、草稿状态或测试渠道不符合发行约定。' }
+    # 保留历史版本的双附件格式。新版本签名与正文一样从 GitHub 校验后原样镜像。
+    if ($gh.assets.name -ccontains 'SHA256SUMS.sig') { $files += 'SHA256SUMS.sig' }
+    elseif ($version -cnotin @('0.1.0-beta.1','0.1.0-beta.2','0.1.0-beta.3','0.1.0-beta.4')) {
+        throw '新发行版缺少 SHA256SUMS.sig，不能同步为可更新版本。'
+    }
     foreach ($file in $files) {
         $asset = @($gh.assets | Where-Object { $_.name -ceq $file -and $_.state -ceq 'uploaded' })
         if ($asset.Count -ne 1 -or $asset[0].size -le 0) { throw "GitHub 尚无完整的 $file。" }
@@ -61,8 +66,9 @@ try {
         if ("sha256:$hash" -cne $asset[0].digest) { throw "GitHub 附件 $file 的 SHA-256 不匹配。" }
     }
     $sums = (Get-Content -LiteralPath (Join-Path $stage $files[0]) -Raw).TrimEnd("`r","`n")
-    if ($sums -cne "$hash  $installer") { throw '安装包与 SHA256SUMS.txt 不匹配。' }
-    if ($CheckOnly) { Write-Output "$Tag：GitHub 的安装包和 SHA256SUMS.txt 校验通过；未发布。"; return }
+    $installerHash = (Get-FileHash -LiteralPath (Join-Path $stage $installer)).Hash.ToLowerInvariant()
+    if ($sums -cne "$installerHash  $installer") { throw '安装包与 SHA256SUMS.txt 不匹配。' }
+    if ($CheckOnly) { Write-Output "$Tag：GitHub 的发行附件校验通过；未发布。"; return }
 
     $api = "https://api.cnb.cool/$CnbRepository/-/releases"
     $public = "https://cnb.cool/$CnbRepository/-/releases"

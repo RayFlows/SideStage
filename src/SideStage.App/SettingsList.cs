@@ -10,13 +10,13 @@ namespace SideStage.App;
 internal sealed class SettingsList : TableLayoutPanel
 {
     /// <summary>创建按内容增高的单列分组，由外层滚动区域决定行宽。</summary>
-    internal SettingsList()
+    internal SettingsList(int topGap = 2, int bottomGap = 4)
     {
         DoubleBuffered = true;
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
         Dock = DockStyle.Top;
-        Margin = new Padding(0, 2, 0, 4);
+        DrawerMetrics.Margin(this, 0, topGap, 0, bottomGap);
         Padding = Padding.Empty;
         BackColor = PaperFieldSurface.Paper;
         ColumnCount = 1;
@@ -83,7 +83,7 @@ internal sealed class SettingsActionRow : Button
         Text = caption;
         Font = font;
         _disclosure = disclosure;
-        Height = 36;
+        DrawerMetrics.Bind(this, () => Height = DrawerMetrics.RowHeight(this, 36));
         BackColor = PaperFieldSurface.Paper;
         ForeColor = PaperFieldSurface.Ink;
         FlatStyle = FlatStyle.Flat;
@@ -112,8 +112,8 @@ internal sealed class SettingsSwitch : CheckBox
     {
         Text = caption;
         Font = font;
-        Height = 36;
         AutoSize = false;
+        DrawerMetrics.Bind(this, () => Height = DrawerMetrics.RowHeight(this, 36));
         BackColor = PaperFieldSurface.Paper;
         Cursor = Cursors.Hand;
         DoubleBuffered = true;
@@ -146,20 +146,31 @@ internal sealed class SettingsSwitch : CheckBox
 internal sealed class SettingsInputRow : Panel
 {
     private readonly Control _input;
+    private readonly Button? _trailingAction;
 
     /// <summary>绑定编辑器的鼠标和焦点状态。文本值、选区、密码遮罩均由原生输入控件管理。</summary>
-    internal SettingsInputRow(string caption, Control input, Font font)
+    internal SettingsInputRow(string caption, Control input, Font font, Button? trailingAction = null)
     {
         _input = input;
+        _trailingAction = trailingAction;
         Font = font;
         Text = input.AccessibleName = caption;
-        Height = 39;
         DoubleBuffered = true;
         ResizeRedraw = true;
         input.BackColor = PaperFieldSurface.Paper;
         input.ForeColor = PaperFieldSurface.Ink;
         input.Font = font;
         Controls.Add(input);
+        if (trailingAction != null)
+        {
+            Controls.Add(trailingAction);
+            trailingAction.MouseEnter += RefreshField;
+            trailingAction.MouseLeave += RefreshField;
+            trailingAction.GotFocus += RefreshField;
+            trailingAction.LostFocus += RefreshField;
+        }
+        DrawerMetrics.Bind(this, () => Height = Math.Max(DrawerMetrics.RowHeight(this, 39),
+            input.PreferredSize.Height + LogicalToDeviceUnits(8)));
         MouseEnter += RefreshField;
         MouseLeave += RefreshField;
         input.MouseEnter += RefreshField;
@@ -174,14 +185,23 @@ internal sealed class SettingsInputRow : Panel
         base.OnLayout(e);
         if (_input is null) return;
         Rectangle content = PaperFieldSurface.Content(this);
-        int left = content.Left + LogicalToDeviceUnits(76);
-        _input.SetBounds(left, (Height - _input.Height) / 2, Math.Max(1, content.Right - left), _input.Height);
+        int labelWidth = TextRenderer.MeasureText(Text, Font, Size.Empty,
+            TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding).Width;
+        int left = content.Left + Math.Max(LogicalToDeviceUnits(76), labelWidth + LogicalToDeviceUnits(8));
+        int right = content.Right;
+        if (_trailingAction != null)
+        {
+            int size = Math.Min(Height - 2, LogicalToDeviceUnits(30));
+            _trailingAction.SetBounds(right - size, (Height - size) / 2, size, size);
+            right = _trailingAction.Left - LogicalToDeviceUnits(4);
+        }
+        _input.SetBounds(left, (Height - _input.Height) / 2, Math.Max(1, right - left), _input.Height);
     }
 
     /// <summary>在行与子窗口交界处重新计算整行命中，防止鼠标经过输入框时出现异色矩形。</summary>
     private void RefreshField(object? sender, EventArgs e)
     {
-        _input.BackColor = PaperFieldSurface.RowColor(this, _input.ContainsFocus);
+        _input.BackColor = PaperFieldSurface.RowColor(this, ContainsFocus);
         Invalidate();
     }
 

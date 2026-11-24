@@ -19,9 +19,17 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        // 自动验收必须让窗口回调异常直接导致进程失败，不能由系统的「继续」对话框掩盖。
+        if (args is ["--check-update-entries"])
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        if (args is ["--update-window", var image]) return UpdateWindowCheck.Run(image);
+        if (args is ["--preview-update"]) return UpdateWindowCheck.Preview();
+        if (args is ["--update-entries", "auto"]) return UpdateEntryTrial.Run(startup: true);
+        if (args is ["--update-entries", "manual"]) return UpdateEntryTrial.Run(startup: false);
+        if (args is ["--check-update-entries"]) return UpdateEntryTrial.Verify();
         Rectangle work = Screen.PrimaryScreen!.WorkingArea;
         Rectangle initial = new(work.Left + (work.Width - 960) / 2, work.Top + (work.Height - 640) / 2, 960, 640);
         // 背板也覆盖最外一档拖动轨迹以外的采样点，确保读回的黑色确实来自测试窗。
@@ -38,9 +46,12 @@ internal static class Program
         string? openedFolder = null;
         int folderOpenCount = 0;
         // 首次使用场景只改变内存中的开关，配合独立凭据项走正式首页的完整路径。
-        var firstUse = args is ["--first-use", _] or ["--settings"] or ["--settings", _] ? new FirstUseSessions() : null;
+        bool dpiCycle = args.FirstOrDefault() == "--dpi-cycle";
+        bool homeLayout = dpiCycle || args.FirstOrDefault() == "--home-layout";
+        bool drawerLayout = args.FirstOrDefault() == "--drawer-layout";
+        var firstUse = homeLayout || drawerLayout || args is ["--first-use", _] or ["--settings"] or ["--settings", _] ? new FirstUseSessions() : null;
         using ParchmentPreviewForm window = new(vault, logDirectory, folder => { openedFolder = folder; folderOpenCount++; },
-            pollSessions: args is not ["--connected-resize"], sessionInspector: firstUse,
+            pollSessions: !homeLayout && !drawerLayout && args is not ["--connected-resize"], sessionInspector: firstUse,
             enableChildSessions: firstUse is null ? null : firstUse.EnableAsync) { StartPosition = FormStartPosition.Manual, TopMost = true,
             Bounds = initial };
         back.Show();
@@ -48,6 +59,21 @@ internal static class Program
         window.Show(back);
         SetForegroundWindow(window.Handle);
         Settle();
+        if (dpiCycle)
+        {
+            HomeDpiCycleCheck.Run(window, args.ElementAtOrDefault(1));
+            return 0;
+        }
+        if (drawerLayout)
+        {
+            DrawerLayoutCheck.Run(window, args.ElementAtOrDefault(1));
+            return 0;
+        }
+        if (homeLayout)
+        {
+            HomeLayoutCheck.Run(window, args.ElementAtOrDefault(1));
+            return 0;
+        }
         if (args is ["--first-use", var screenshot])
         {
             SettingsInteractionCheck.CheckFirstUse(window, screenshot);
@@ -66,6 +92,11 @@ internal static class Program
         {
             try
             {
+                // 交互采样需要按钮真正位于屏幕内，小窗滚动另有专门步骤覆盖。
+                window.Size = new Size(Math.Min(work.Width, window.LogicalToDeviceUnits(960)),
+                    Math.Min(work.Height, window.LogicalToDeviceUnits(640)));
+                window.Location = new Point(work.Left + (work.Width - window.Width) / 2, work.Top + (work.Height - window.Height) / 2);
+                Settle();
                 int result = SettingsInteractionCheck.Run(window, args.ElementAtOrDefault(1));
                 if (folderOpenCount != 2 || openedFolder != logDirectory ||
                     !File.ReadAllText(Directory.GetFiles(logDirectory, "*.log").Single()).Contains("测试日志"))
@@ -109,7 +140,7 @@ internal static class Program
     }
 
     /// <summary>向验收窗口提供尚未启用分身的首次使用状态，只在内存中处理启用请求。</summary>
-    private sealed class FirstUseSessions : ISessionInspector
+    internal sealed class FirstUseSessions : ISessionInspector
     {
         private bool _enabled;
 
