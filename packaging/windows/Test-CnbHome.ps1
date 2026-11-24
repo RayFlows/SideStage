@@ -47,8 +47,13 @@ try {
     git -C $origin commit -qm 'new'
     git -C $origin tag -a v1.0.0-beta.10 -m 'annotated'
     Set-Location $runner
-    git config "url.$(([uri]$origin).AbsoluteUri).insteadOf" 'https://github.com/example/source.git'
-    git config "url.$(([uri]$mirror).AbsoluteUri).insteadOf" 'https://cnb.cool/example/mirror.git'
+    # POSIX 路径用普通 [uri] 转换可能变成相对 URI；显式指定 file 协议，两个平台都不能访问外网。
+    $from = [UriBuilder]::new('file','',-1,$origin.Replace('\','/')).Uri.AbsoluteUri
+    $to = [UriBuilder]::new('file','',-1,$mirror.Replace('\','/')).Uri.AbsoluteUri
+    git config "url.$from.insteadOf" 'https://github.com/example/source.git'
+    git config "url.$to.insteadOf" 'https://cnb.cool/example/mirror.git'
+    if ((git ls-remote --get-url 'https://github.com/example/source.git') -cne $from -or
+        (git ls-remote --get-url 'https://cnb.cool/example/mirror.git') -cne $to) { throw '离线 Git 地址映射未生效。' }
     [IO.File]::WriteAllText((Join-Path $runner 'local-only.txt'), 'not public')
     git add local-only.txt
     $index = git write-tree
