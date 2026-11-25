@@ -1,0 +1,40 @@
+# Collect what the user wants to do, where they got stuck, and what they tried.
+name: Usage question
+description: Ask how to install, connect, or use SideStage.
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before posting, you can check [Usage](https://github.com/RayFlows/SideStage/blob/main/README.en.md#usage) and the [Q&A](https://github.com/RayFlows/SideStage/blob/main/README.en.md#qa) in the README, or [search existing issues](https://github.com/RayFlows/SideStage/issues?q=is%3Aissue).
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      placeholder: e.g. Keep programs running in the child session after disconnecting SideStage.
+    validations:
+      required: true
+  - type: textarea
+    id: stuck
+    attributes:
+      label: Where did you get stuck?
+      description: Tell us which button you clicked and what you saw on screen.
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried?
+      description: Briefly describe what you tried and the result, or write "Nothing yet".
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: SideStage and Windows versions
+      placeholder: e.g. SideStage v0.1.0-beta.7, Windows 11 24H2 Pro
+  - type: textarea
+    id: details
+    attributes:
+      label: Screenshots or error messages
+      description: Remove usernames, device names, passwords, PINs, and other sensitive information before posting.
