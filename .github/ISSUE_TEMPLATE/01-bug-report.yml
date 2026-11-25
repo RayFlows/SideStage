@@ -1,0 +1,63 @@
+# 收集排查 SideStage 故障所需的版本、环境与复现信息。
+name: Bug 反馈
+description: 报告连接失败、界面异常、闪退或其他故障。
+labels: [bug]
+body:
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已阅读 README 的[使用方法](https://github.com/RayFlows/SideStage#使用方法)和 [Q&A](https://github.com/RayFlows/SideStage#qa)。
+          required: true
+        - label: 我已[搜索现有 Issue](https://github.com/RayFlows/SideStage/issues?q=is%3Aissue)，没有找到同一个问题。
+          required: true
+  - type: input
+    id: sidestage-version
+    attributes:
+      label: SideStage 版本
+      description: 请填写完整版本号。预发行版请保留 beta 等后缀。
+      placeholder: 例如 v0.1.0-beta.7
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows 版本和版别
+      description: 按 Win + R，输入 `winver` 后可以查看。如果方便，请同时填写操作系统内部版本号。
+      placeholder: 例如 Windows 11 24H2 专业版
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 按顺序写出操作，以及每次都会出现还是偶发。如果只遇到一次，请描述当时的操作。
+      placeholder: |
+        1. 打开 SideStage。
+        2. 在「登录凭据」中保存本机账户。
+        3. 点击「连接」。
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际表现
+      placeholder: 自动连接时弹出登录错误，手动输入后可以连接。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期表现
+      placeholder: 点击连接后可以用已保存的凭据登录。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 日志、截图或错误码
+      description: |
+        从「高级设置 → 活动日志」旁的信息图标打开日志文件夹，附上出问题时的日志片段。安装或启动失败时，可以提交安装报错或截图。
+        如果涉及 RDP 登录，也可以写明主桌面是用 PIN 还是密码登录，以及 SideStage 是否配置了登录凭据。
+        这是公开页面。提交前请遮盖用户名、设备名、密码、PIN 和其他敏感信息。

@@ -1,0 +1,19 @@
+# 记录功能建议对应的使用场景和期望行为。
+name: 功能建议
+description: 建议增加功能，或改进现有操作。
+labels: [enhancement]
+body:
+  - type: textarea
+    id: use-case
+    attributes:
+      label: 使用场景
+      description: 你在什么情况下会用到这个功能？现在操作时有什么不方便？
+    validations:
+      required: true
+  - type: textarea
+    id: desired-behavior
+    attributes:
+      label: 希望怎样改？
+      description: 描述你希望能完成的操作，或者希望看到的结果。
+    validations:
+      required: true
