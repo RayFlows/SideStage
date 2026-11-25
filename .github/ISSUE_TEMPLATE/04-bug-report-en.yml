@@ -1,0 +1,63 @@
+# Collect the version, environment, and steps needed to reproduce a SideStage bug.
+name: Bug report
+description: Report a connection failure, visual problem, crash, or other bug.
+labels: [bug]
+body:
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before submitting
+      options:
+        - label: I've read [Usage](https://github.com/RayFlows/SideStage/blob/main/README.en.md#usage) and the [Q&A](https://github.com/RayFlows/SideStage/blob/main/README.en.md#qa) in the README.
+          required: true
+        - label: I've [searched existing issues](https://github.com/RayFlows/SideStage/issues?q=is%3Aissue) for duplicates.
+          required: true
+  - type: input
+    id: sidestage-version
+    attributes:
+      label: SideStage version
+      description: Enter the full version number, including any prerelease suffix such as beta.
+      placeholder: e.g. v0.1.0-beta.7
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version and edition
+      description: Press Win + R and run `winver` to check. Include the OS build number if available.
+      placeholder: e.g. Windows 11 24H2 Pro
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the steps in order and say how often the bug occurs. If you only saw it once, describe what you were doing at the time.
+      placeholder: |
+        1. Open SideStage.
+        2. Save your local account in Login credentials (登录凭据).
+        3. Click Connect (连接).
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      placeholder: Automatic sign-in shows an error. Entering the credentials manually works.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+      placeholder: Clicking Connect signs in with the saved credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, screenshots, or error codes
+      description: |
+        Use the information icon beside Advanced settings → Activity log (高级设置 → 活动日志) to open the log folder, then attach the relevant excerpt. If setup or startup fails, include the error message or a screenshot.
+        For RDP sign-in issues, you can mention whether you sign in to the main desktop with a PIN or a password and whether you configured credentials in SideStage.
+        Issues are public. Remove usernames, device names, passwords, PINs, and other sensitive information before posting.

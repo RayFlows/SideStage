@@ -4,6 +4,8 @@
 
 <h1 align="center">SideStage</h1>
 
+<p align="center">简体中文 · <a href="./README.en.md">English</a></p>
+
 <p align="center">
   <a href="#下载"><img alt="Windows 10 / 11 x64" src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011%20x64-1E9BFA?style=flat-square" /></a>
   <a href="https://github.com/RayFlows/SideStage/releases"><img alt="发行版本（含预发行版）" src="https://img.shields.io/github/v/release/RayFlows/SideStage?include_prereleases&amp;sort=semver&amp;label=release&amp;style=flat-square&amp;color=1E9BFA" /></a>

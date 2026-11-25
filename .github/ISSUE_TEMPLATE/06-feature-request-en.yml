@@ -1,0 +1,19 @@
+# Record the use case and desired behavior for a SideStage feature request.
+name: Feature request
+description: Suggest a new feature or an improvement to an existing workflow.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: When would you use this feature? What is difficult about the current workflow?
+    validations:
+      required: true
+  - type: textarea
+    id: desired-behavior
+    attributes:
+      label: What would you like to change?
+      description: Describe what you want to be able to do or what result you'd like to see.
+    validations:
+      required: true
