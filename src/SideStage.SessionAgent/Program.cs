@@ -67,6 +67,14 @@ internal static class Program
             try
             {
                 ValidateRequest(request, agentArguments);
+                if (request.ProbeInput)
+                {
+                    bool acceptedInput = DesktopInputProbe.TryZeroMove();
+                    await SessionAgentProtocol.WriteFrameAsync(pipe, new SessionAgentLaunchResponse(
+                        true, 0, request.ExpectedSessionId, null, null, null, InputAccepted: acceptedInput),
+                        handshakeTimeout.Token).ConfigureAwait(false);
+                    return 0;
+                }
                 if (request.Capture)
                 {
                     await CaptureDesktopAsync(
@@ -232,6 +240,13 @@ internal static class Program
         {
             throw new InvalidOperationException(
                 $"代理当前位于会话 {currentSessionId}，但宿主预期会话为 {request.ExpectedSessionId}。");
+        }
+
+        if (request.ProbeInput)
+        {
+            if (request.Capture || request.ExecutablePath.Length != 0)
+                throw new InvalidDataException("输入测试不能与截图或启动程序合并。");
+            return;
         }
 
         if (request.Capture)

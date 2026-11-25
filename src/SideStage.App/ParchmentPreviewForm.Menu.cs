@@ -38,6 +38,7 @@ internal sealed partial class ParchmentPreviewForm
     /// <summary>在菜单弹出时同步状态，执行自定义命令后消费消息，避免送入 RDP。</summary>
     protected override void WndProc(ref Message message)
     {
+        if (message.Msg == 0x02B1) OnSessionChange(message.WParam, message.LParam); // WM_WTSSESSION_CHANGE
         if (HandleWindowFrameMessage(ref message)) return;
         if (message.Msg == NonClientRightUp && message.WParam == HitCaption)
         {

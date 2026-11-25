@@ -23,7 +23,7 @@ namespace SideStage.Core.Processes;
 /// </summary>
 internal static class SessionAgentProtocol
 {
-    internal const int CurrentVersion = 2;
+    internal const int CurrentVersion = 3;
     private const int MaximumFrameBytes = 1024 * 1024;
 
     /// <summary>
@@ -181,6 +181,7 @@ internal static class SessionAgentProtocol
 /// <param name="Capture">是否只请求代理捕获当前桌面而不启动目标进程。</param>
 /// <param name="CaptureWidth">截图操作预期的桌面像素宽度。</param>
 /// <param name="CaptureHeight">截图操作预期的桌面像素高度。</param>
+/// <param name="ProbeInput">仅在目标分身测试零位移鼠标输入，不启动程序。</param>
 internal sealed record SessionAgentLaunchRequest(
     int ProtocolVersion,
     string AuthenticationToken,
@@ -190,7 +191,8 @@ internal sealed record SessionAgentLaunchRequest(
     string[] Arguments,
     bool Capture = false,
     int CaptureWidth = 1920,
-    int CaptureHeight = 1080);
+    int CaptureHeight = 1080,
+    bool ProbeInput = false);
 
 /// <summary>
 /// 表示会话内代理启动目标程序后的结构化结果。
@@ -202,6 +204,7 @@ internal sealed record SessionAgentLaunchRequest(
 /// <param name="ErrorStage">失败阶段。</param>
 /// <param name="ErrorMessage">不包含命令行参数的诊断信息。</param>
 /// <param name="ImageLength">截图响应的 PNG 字节数。</param>
+/// <param name="InputAccepted">输入测试的结果。空值表示没有执行这项测试。</param>
 internal sealed record SessionAgentLaunchResponse(
     bool Succeeded,
     int ProcessId,
@@ -209,4 +212,5 @@ internal sealed record SessionAgentLaunchResponse(
     int? NativeErrorCode,
     string? ErrorStage,
     string? ErrorMessage,
-    int ImageLength = 0);
+    int ImageLength = 0,
+    bool? InputAccepted = null);

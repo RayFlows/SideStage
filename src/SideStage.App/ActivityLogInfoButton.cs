@@ -1,27 +1,39 @@
 /*
  * 文件名称：ActivityLogInfoButton.cs
- * 文件职责：为日志标题提供带圈的信息图标，以及包含本机目录链接的说明气泡。
+ * 文件职责：为活动日志与会话恢复提供带圈的信息图标、可换行的说明和可点击的链接。
  * 交互约定：悬停、点击或键盘激活都能打开气泡；指针可以从图标移到链接继续操作。
  */
 using System.Drawing.Drawing2D;
 
 namespace SideStage.App;
 
-internal sealed class ActivityLogInfoButton : Button
+internal sealed class ActivityLogInfoButton : PaperInfoButton
+{
+    /// <summary>在日志标题旁显示本机活动记录的说明和目录链接。</summary>
+    internal ActivityLogInfoButton(Font iconFont, Font bodyFont, Action openDirectory)
+        : base(iconFont, bodyFont, "活动日志说明", $"{Program.DisplayName} 的活动记录", "打开完整日志文件夹", openDirectory) { }
+}
+
+/// <summary>设置和日志共用的信息入口，保留一致的边缘、键盘和悬停行为。</summary>
+internal class PaperInfoButton : Button
 {
     private readonly PaperHintBubble _popup;
     private readonly LinkLabel _link;
-    private readonly Action _openDirectory;
+    private readonly Action _openLink;
     private readonly System.Windows.Forms.Timer _leaveTimer = new() { Interval = 300 };
     private bool _keyboardOpen;
+    /// <summary>当前已展开气泡的实际屏幕范围，包含 Windows 对位置的自动调整。</summary>
+    internal Rectangle BubbleBounds => _popup.Visible ? _popup.Bounds : Rectangle.Empty;
 
-    /// <summary>使用系统信息图标和可聚焦的原生链接构建气泡，打开目录的动作由窗口提供。</summary>
-    internal ActivityLogInfoButton(Font iconFont, Font bodyFont, Action openDirectory)
+    /// <summary>按正文、原生链接、补充说明的顺序布局。链接目标和打开动作由调用方提供。</summary>
+    internal PaperInfoButton(Font iconFont, Font bodyFont, string title, string note, string linkText, Action openLink,
+        string? footer = null)
     {
-        _openDirectory = openDirectory;
+        _openLink = openLink;
         Text = "\uE946";
         Font = iconFont;
-        AccessibleName = "活动日志说明";
+        AccessibleName = title;
+        AccessibleDescription = footer is null ? note : $"{note} {footer}";
         Cursor = Cursors.Hand;
         ForeColor = PaperFieldSurface.Brass;
         FlatStyle = FlatStyle.Flat;
@@ -32,17 +44,22 @@ internal sealed class ActivityLogInfoButton : Button
         Color surface = PaperHintBubble.Surface;
         TableLayoutPanel content = new()
         {
-            ColumnCount = 1, RowCount = 2, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1, RowCount = footer is null ? 2 : 3, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
             BackColor = surface, Font = bodyFont,
         };
         DrawerMetrics.Bind(content, () => content.Padding = DrawerMetrics.Space(content, 12, 9, 14, 10));
-        content.Controls.Add(new Label { Text = $"{Program.DisplayName} 的活动记录", AutoSize = true,
-            ForeColor = Color.FromArgb(249, 243, 229), Margin = Padding.Empty }, 0, 0);
-        _link = new LinkLabel { Text = "打开完整日志文件夹  ›", AutoSize = true, Font = bodyFont,
-            LinkBehavior = LinkBehavior.HoverUnderline,
-            LinkColor = Color.FromArgb(184, 225, 211), ActiveLinkColor = Color.White, AccessibleName = "打开完整日志文件夹" };
+        content.Controls.Add(CreateParagraph(note), 0, 0);
+        _link = new LinkLabel { Text = $"{linkText}  ›", AutoSize = true, Font = bodyFont,
+            LinkBehavior = LinkBehavior.HoverUnderline, LinkColor = Color.FromArgb(184, 225, 211),
+            ActiveLinkColor = Color.White, AccessibleName = linkText };
         content.Controls.Add(_link, 0, 1);
         DrawerMetrics.Margin(_link, 0, 5, 0, 0);
+        if (footer != null)
+        {
+            Label last = CreateParagraph(footer);
+            content.Controls.Add(last, 0, 2);
+            DrawerMetrics.Margin(last, 0, 5, 0, 0);
+        }
         _popup = new PaperHintBubble(this);
         _popup.Items.Add(new ToolStripControlHost(content) { Padding = Padding.Empty, Margin = Padding.Empty });
         _link.LinkClicked += (_, _) => OpenFromBubble();
@@ -64,14 +81,22 @@ internal sealed class ActivityLogInfoButton : Button
         VisibleChanged += (_, _) => { if (!Visible) _popup.Close(); };
     }
 
-    /// <summary>关闭说明并打开本次日志目录。键盘打开时先把焦点交还入口，便于返回后继续浏览。</summary>
+    /// <summary>限制气泡段落的行宽并保留自动增高，兼顾较大字号。</summary>
+    private Label CreateParagraph(string text)
+    {
+        Label body = new() { Text = text, AutoSize = true, Margin = Padding.Empty, ForeColor = Color.FromArgb(249, 243, 229) };
+        DrawerMetrics.Bind(body, () => body.MaximumSize = new Size(LogicalToDeviceUnits(264), 0));
+        return body;
+    }
+
+    /// <summary>关闭说明并打开对应链接。键盘打开时先把焦点交还入口，便于返回后继续浏览。</summary>
     private void OpenFromBubble()
     {
         if (!_popup.Visible) return;
         bool restoreFocus = _keyboardOpen;
         _popup.Close();
         if (restoreFocus && CanFocus) Focus();
-        _openDirectory();
+        _openLink();
     }
 
     /// <summary>让气泡右缘与图标对齐。键盘激活时将焦点移给链接，鼠标悬停时保留当前操作。</summary>

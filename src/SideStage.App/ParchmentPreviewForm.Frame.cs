@@ -203,6 +203,7 @@ internal sealed partial class ParchmentPreviewForm
     /// <summary>窗口句柄重建或关闭时释放依附在该句柄上的边缘资源。</summary>
     protected override void OnHandleDestroyed(EventArgs e)
     {
+        UnregisterSessionChanges();
         _borderDrag?.Dispose();
         _borderDrag = null;
         _previewResize?.Dispose();

@@ -23,6 +23,7 @@ internal sealed partial class ParchmentPreviewForm
         if (_preparingUpdate) { e.Cancel = true; return; }
         if (_confirmingClose) { e.Cancel = true; return; }
         _confirmingClose = true;
+        CancelParentRecovery();
         try
         {
             e.Cancel = !ConfirmPreviewClose(ReadCloseState, AskClose, _sessionTerminator.LogoffCurrentChildSession);
