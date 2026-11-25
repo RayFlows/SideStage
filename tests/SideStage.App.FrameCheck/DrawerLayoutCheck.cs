@@ -22,6 +22,7 @@ internal static class DrawerLayoutCheck
         Console.WriteLine($"窗口 {window.DeviceDpi} DPI，开关行 {toggle.Height}px，轨道 {toggle.LogicalToDeviceUnits(20)}px，" +
             $"日志标题 {title.Height}px，收起按钮 {close.Height}px。");
         if (screenshot != null) SettingsInteractionCheck.Capture(window, screenshot);
+        CheckRecoveryHelp(window, controls, screenshot);
         foreach (var row in controls.Where(c => c.Visible && c is SettingsSwitch or SettingsActionRow or PaperComboBox))
             CheckRow(row, 36);
         CheckRow(info, 27);
@@ -53,6 +54,34 @@ internal static class DrawerLayoutCheck
             throw new InvalidOperationException("小窗口的设置行超出视口。");
         close.PerformClick();
         if (close.Visible || info.Visible) throw new InvalidOperationException("点击把手后，侧栏及把手应一起收起。");
+    }
+
+    /// <summary>从实际的侧栏入口展开说明，核对链接和末尾提示的顺序。截图仅保留相关区域。</summary>
+    private static void CheckRecoveryHelp(Form window, Control[] controls, string? screenshot)
+    {
+        var button = controls.OfType<PaperInfoButton>().Single(b => b.AccessibleName == "会话恢复说明");
+        var toggle = controls.OfType<SettingsSwitch>().Single(s => s.Text == "远程断开后接回主桌面");
+        button.PerformClick();
+        Application.DoEvents();
+        Point bodyPoint = button.PointToScreen(new Point(button.Width / 2, button.Height + button.LogicalToDeviceUnits(18)));
+        Control? hit = Control.FromChildHandle(SettingsInteractionCheck.WindowFromPoint(bodyPoint));
+        while (hit is not null && hit is not PaperHintBubble) hit = hit.Parent;
+        if (hit is not PaperHintBubble bubble) throw new InvalidOperationException("会话恢复说明未能展开。");
+        var labels = Children(bubble).OfType<Label>().OrderBy(label => label.Top).ToArray();
+        if (labels.Length != 3 || labels[1] is not LinkLabel { AccessibleName: "查看 Issue #5" } ||
+            labels[2].Text != "如果您不知道这是在干什么，请保持开启按钮。" ||
+            labels.Any(label => label.PreferredHeight > label.Height) || !toggle.Visible)
+            throw new InvalidOperationException("会话恢复说明未完整显示。");
+        if (screenshot != null)
+        {
+            Rectangle area = Rectangle.Inflate(Rectangle.Union(toggle.RectangleToScreen(toggle.ClientRectangle),
+                Rectangle.Union(button.Parent!.RectangleToScreen(button.Parent.ClientRectangle), bubble.Bounds)), 12, 12);
+            using Bitmap image = new(area.Width, area.Height);
+            using Graphics graphics = Graphics.FromImage(image);
+            graphics.CopyFromScreen(area.Location, Point.Empty, area.Size);
+            image.Save(Path.ChangeExtension(screenshot, "help.png"), System.Drawing.Imaging.ImageFormat.Png);
+        }
+        bubble.Close();
     }
 
     /// <summary>在工作区坐标内核对把手的真实位置、点击范围和 DPI 比例。</summary>

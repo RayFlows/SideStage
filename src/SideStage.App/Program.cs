@@ -6,7 +6,7 @@
  * 运行约束：
  *   - 使用 STA 线程创建并运行 Windows RDP ActiveX 控件。
  *   - 不在启动时创建、连接、启用或注销任何会话。
- *   - 所有会改变会话状态的操作都必须由用户在窗口中明确触发。
+ *   - 主窗口按用户的会话恢复偏好处理已连接分身的远程断开通知。
  */
 
 using System.Windows.Forms;
@@ -40,15 +40,11 @@ internal static class Program
         if (args is [ChildSessionEnableCommand.Argument]) return ChildSessionEnableCommand.EnableOnce();
         ApplicationConfiguration.Initialize();
 
-        // 使用 --classic 参数可以启动旧版界面
-        if (args.Length > 0 && args[0] == "--classic")
-        {
-            Application.Run(new ClassicPreviewForm());
-        }
-        else
-        {
-            Application.Run(new ParchmentPreviewForm());
-        }
+        // 两种界面的默认布局不同，分别记住各自的主窗口大小。
+        bool classic = args.Length > 0 && args[0] == "--classic";
+        using Form window = classic ? new ClassicPreviewForm() : new ParchmentPreviewForm();
+        WindowSizeMemory.Attach(window, @"Software\SideStage", classic ? "ClassicWindowSize" : "WindowSize");
+        Application.Run(window);
         return 0;
     }
 }

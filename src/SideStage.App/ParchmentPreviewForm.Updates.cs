@@ -179,6 +179,7 @@ internal sealed partial class ParchmentPreviewForm
     {
         if (_preparingUpdate) return;
         _preparingUpdate = true;
+        CancelParentRecovery();
         try
         {
             Enabled = false;

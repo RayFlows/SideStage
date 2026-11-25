@@ -149,12 +149,15 @@ internal static class SettingsInteractionCheck
         {
             using Bitmap background = CaptureArea(window.Bounds);
             Cursor.Position = info.PointToScreen(new Point(info.Width / 2, info.Height / 2));
-            Wait(SystemInformation.MouseHoverTime + 180);
-            Point bubble = info.PointToScreen(new Point(0, info.Height + 12));
+            Point anchor = Cursor.Position;
+            // 等到系统真正送达悬停并显示气泡再向下移动，避免受屏幕刷新和 UI 消息队列延迟影响。
+            long deadline = Environment.TickCount64 + SystemInformation.MouseHoverTime + 1500;
+            while (info.BubbleBounds.IsEmpty && Environment.TickCount64 < deadline) Wait(40);
+            Require(!info.BubbleBounds.IsEmpty, $"悬停打开日志气泡（图标 {Control.FromChildHandle(WindowFromPoint(anchor))?.AccessibleName}，指针 {Cursor.Position}，目标 {anchor}）");
+            Point bubble = new(info.BubbleBounds.Left + info.BubbleBounds.Width / 2, info.BubbleBounds.Top + info.LogicalToDeviceUnits(15));
             Cursor.Position = bubble;
             Wait(380);
-            var hit = Control.FromChildHandle(WindowFromPoint(bubble));
-            while (hit != null && hit is not ToolStripDropDown) hit = hit.Parent;
+            var hit = FindPopupAt(bubble);
             if (screenshot != null) Capture(window, Path.ChangeExtension(screenshot, "help.png"));
             Require(hit is ToolStripDropDown, "悬停后可移入日志气泡");
             var popup = (ToolStripDropDown)hit!;
@@ -195,8 +198,16 @@ internal static class SettingsInteractionCheck
         finally { Cursor.Position = origin; }
     }
 
+    /// <summary>沿真实命中窗口向上查找承载说明的弹出层。</summary>
+    private static ToolStripDropDown? FindPopupAt(Point point)
+    {
+        Control? hit = Control.FromChildHandle(WindowFromPoint(point));
+        while (hit != null && hit is not ToolStripDropDown) hit = hit.Parent;
+        return hit as ToolStripDropDown;
+    }
+
     /// <summary>获取真实指针命中的窗口及当前键盘焦点，验证气泡的原生输入路径。</summary>
-    [DllImport("user32.dll")] private static extern nint WindowFromPoint(Point point);
+    [DllImport("user32.dll")] internal static extern nint WindowFromPoint(Point point);
     /// <summary>读取当前测试线程的焦点句柄。</summary>
     [DllImport("user32.dll")] private static extern nint GetFocus();
     /// <summary>只向验收窗口的消息循环投递按键，保留 WinForms 对菜单和对话键的预处理。</summary>

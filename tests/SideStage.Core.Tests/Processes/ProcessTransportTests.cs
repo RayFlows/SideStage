@@ -15,6 +15,22 @@ namespace SideStage.Core.Tests.Processes;
 [TestClass]
 public sealed class ProcessTransportTests
 {
+    /// <summary>
+    /// 显式开启本机验收时，让普通权限的一次性代理通过专用管道返回实际输入测试结果。
+    /// 在当前已解锁桌面只发送一次零位移事件，不切换会话或打开应用。
+    /// </summary>
+    [TestMethod]
+    public async Task Transport_ProbesInteractiveInput()
+    {
+        if (Environment.GetEnvironmentVariable("SIDESTAGE_TEST_TRANSPORT") != "1")
+            Assert.Inconclusive("需要显式启用本机临时计划任务验收。");
+        var current = new SideStage.Core.Platform.Windows.WindowsSessionInspector().GetCurrentSession();
+        if (!current.IsDesktopReady) Assert.Inconclusive("输入探针验收需要已解锁的交互桌面。");
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(20));
+        bool received = await new WindowsTaskSchedulerChildSessionProcessStarter().ProbeInputAsync(current.Id, timeout.Token);
+        Assert.IsTrue(received, "普通权限代理应能在当前交互桌面投递零位移输入。");
+    }
+
     /// <summary>按需运行有副作用的传输验收，仅操作由此测试创建的有限时长回环 ping。</summary>
     /// <param name="terminate">主动终止或等待自然退出，两条路径都应保留准确的最终状态。</param>
     [TestMethod]

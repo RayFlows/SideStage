@@ -107,6 +107,7 @@ internal sealed partial class ParchmentPreviewForm : Form
     {
         _updates = updateFeed ?? ReleaseUpdateFeed.FromBuild();
         _updatePreferenceKey = updatePreferenceKey;
+        _watchSessionChanges = pollSessions && sessionInspector is null;
         _sessionInspector = sessionInspector ?? new WindowsSessionInspector();
         _enableChildSessions = enableChildSessions ?? ChildSessionEnableCommand.EnableAsync;
         _credentialStore = credentialStore;
@@ -168,6 +169,7 @@ internal sealed partial class ParchmentPreviewForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        RegisterSessionChanges();
         InstallSessionMenu();
         ConfigureFrameCompositor();
         UpdateFrameGeometry();
@@ -495,6 +497,7 @@ internal sealed partial class ParchmentPreviewForm : Form
         _credentialsRow = new SettingsActionRow("登录凭据", _bodyFont, ManageCredentials, disclosure: true);
         account.AddRow(_credentialsRow);
         options.Controls.Add(account);
+        AddRecoverySettings(options);
 
         // 两个入口沿用系统菜单的状态与处理函数，注销前仍展示目标编号和默认取消的确认框。
         TableLayoutPanel session = new() { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1,
@@ -673,6 +676,7 @@ internal sealed partial class ParchmentPreviewForm : Form
     private void DisconnectPreview(object? sender, EventArgs e)
     {
         if (!_canDisconnect) return;
+        CancelParentRecovery();
         bool wasAudioReconnect = _audioReconnect.Active;
         bool disconnectIssued = _audioReconnect.Cancel();
         try
@@ -706,6 +710,7 @@ internal sealed partial class ParchmentPreviewForm : Form
                 "确认注销子会话", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
                 MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
             _audioReconnect.Cancel();
+            CancelParentRecovery();
             _sessionTerminator.LogoffCurrentChildSession(child.Id);
             AppendLog($"Windows 已接受子会话 {child.Id.Value} 的注销请求。", LogLevel.Warning);
         }
@@ -918,6 +923,9 @@ internal sealed partial class ParchmentPreviewForm : Form
                 _lastTransientStatus = string.Empty;
             }
 
+            if (_registeredForSessions && _recoverParent?.Checked == true)
+                _disconnectWatch.Observe(parent, verified ? _previewPanel.PreviewControl.VerifiedConnectionTarget : null);
+
             // 告知面板当前状态，让它控制 AxHost 可用性和空状态遮罩
             _previewPanel.SetPreviewState(
                 prev,
@@ -956,6 +964,7 @@ internal sealed partial class ParchmentPreviewForm : Form
                                       or ArgumentException)
         {
             // 瞬态或平台失败：显示给用户但不崩溃刷新循环
+            _disconnectWatch.ClearTarget();
             if (_lastPollError != ex.Message) AppendLog($"无法读取会话状态：{ex.Message}", LogLevel.Error);
             _lastPollError = ex.Message;
             if (capability is null) UpdateCapabilityCheck(null);

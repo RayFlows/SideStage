@@ -30,6 +30,7 @@ using System.IO.Pipes;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using SideStage.Core.Processes;
 using SideStage.Core.Sessions;
@@ -128,17 +129,26 @@ internal sealed class WindowsTaskSchedulerChildSessionProcessStarter
             cancellationToken: token,
             captureResolution: resolution);
 
+    /// <summary>
+    /// 把一次输入测试投递到指定分身。代理未能运行和 Windows 明确拒绝输入是两种结果，
+    /// 只有后者能作为恢复父桌面的依据。
+    /// </summary>
+    internal Task<bool> ProbeInputAsync(SessionId target, CancellationToken token) =>
+        ExchangeAsync(target, null, (_, response, _) => Task.FromResult(response.InputAccepted
+            ?? throw new InvalidDataException("分身代理没有返回输入测试结果。")), token, probeInput: true);
+
     /// <summary>在指定会话发起一次认证的操作。管道结束即通知代理回收尚未接管的进程。</summary>
     /// <typeparam name="T">调用完成后交付给宿主的结果类型。</typeparam>
     /// <param name="targetSessionId">需要投递代理的已核验子会话。</param>
-    /// <param name="request">启动参数；为空时仅请求当前画面。</param>
+    /// <param name="request">启动参数；截图或复检输入时为空。</param>
     /// <param name="receive">读取并验证与操作对应的响应。</param>
     /// <param name="cancellationToken">取消本次交换。</param>
     /// <param name="captureResolution">截图请求的远端像素尺寸；非截图操作时为空。</param>
+    /// <param name="probeInput">是否要求代理在自己的交互桌面测试输入。</param>
     private async Task<T> ExchangeAsync<T>(SessionId targetSessionId, ChildProcessStartRequest? request,
         Func<Stream, SessionAgentLaunchResponse, CancellationToken, Task<T>> receive,
         CancellationToken cancellationToken,
-        RemoteDesktopResolution? captureResolution = null)
+        RemoteDesktopResolution? captureResolution = null, bool probeInput = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         int nativeSessionId = ConvertSessionId(targetSessionId);
@@ -146,7 +156,7 @@ internal sealed class WindowsTaskSchedulerChildSessionProcessStarter
         string pipeName = $"SideStage-{Environment.ProcessId}-{Guid.NewGuid():N}";
         string authenticationToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
 
-        await using NamedPipeServerStream pipe = new(
+        await using NamedPipeServerStream pipe = probeInput ? CreateInputProbePipe(pipeName) : new(
             pipeName,
             PipeDirection.InOut,
             maxNumberOfServerInstances: 1,
@@ -210,9 +220,10 @@ internal sealed class WindowsTaskSchedulerChildSessionProcessStarter
                         request?.ExecutablePath ?? string.Empty,
                         request?.WorkingDirectory ?? string.Empty,
                         request?.Arguments.ToArray() ?? [],
-                        Capture: request is null,
+                        Capture: captureResolution.HasValue,
                         CaptureWidth: captureResolution?.Width ?? 1920,
-                        CaptureHeight: captureResolution?.Height ?? 1080),
+                        CaptureHeight: captureResolution?.Height ?? 1080,
+                        ProbeInput: probeInput),
                     handshakeTimeout.Token)
                 .ConfigureAwait(false);
 
@@ -265,6 +276,22 @@ internal sealed class WindowsTaskSchedulerChildSessionProcessStarter
             ReleaseComObject(rootFolder);
             ReleaseComObject(service);
         }
+    }
+
+    /// <summary>
+    /// 输入探针使用普通用户令牌，即使宿主以管理员身份启动也要测试普通程序能否输入。
+    /// 管道仅允许本机当前用户。握手仍核对代理映像、会话编号和一次性令牌。
+    /// </summary>
+    private static NamedPipeServerStream CreateInputProbePipe(string name)
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var user = identity.User ?? throw new InvalidOperationException("无法确认输入探针的账户。");
+        var security = new PipeSecurity();
+        // 拒绝网络登录；访问控制明确使用用户 SID，不使用提权后可能变成管理员组的默认所有者。
+        security.SetSecurityDescriptorSddlForm($"D:P(D;;GA;;;NU)(A;;GA;;;{user.Value})");
+        security.SetOwner(user);
+        return NamedPipeServerStreamAcl.Create(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous, 0, 0, security);
     }
 
     /// <summary>

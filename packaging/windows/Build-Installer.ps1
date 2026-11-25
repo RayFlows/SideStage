@@ -17,7 +17,7 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$')]
-    [string] $Version = '0.1.0-beta.7',
+    [string] $Version = '0.1.0-beta.8',
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$')]
     [string] $UpdateRepository,
     [string] $Iscc = 'ISCC.exe',
