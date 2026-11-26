@@ -58,6 +58,10 @@ Name: "{userdesktop}\SideStage"; Filename: "{app}\SideStage.exe"; WorkingDir: "{
 [Run]
 Filename: "{app}\SideStage.exe"; Description: "{cm:LaunchProgram,SideStage}"; Flags: nowait postinstall skipifsilent
 
+[UninstallRun]
+; 只还原仍由当前用户托管的登录入口。便携版的独立代理也能在主窗口退出时照常启动原程序。
+Filename: "{app}\SideStage.exe"; Parameters: "--restore-startup-items"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RestoreUserStartup"
+
 [CustomMessages]
 zhcn.UpgradeTitle=更新 SideStage
 en.UpgradeTitle=Update SideStage

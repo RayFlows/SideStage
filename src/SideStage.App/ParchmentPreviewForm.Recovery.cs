@@ -17,10 +17,13 @@ internal sealed partial class ParchmentPreviewForm
     private const string RecoveryPreference = "RecoverDisconnectedParentToConsole";
     private const string RecoveryIssueUrl = "https://github.com/RayFlows/SideStage/issues/5";
     private const string RecoveryFooter = "如果您不知道这是在干什么，请保持开启按钮。";
-    private const string RecoveryNote = "远程桌面断开且分身输入失效时，尝试将主桌面接回空闲的本机控制台，再检查分身输入。接回后，本机显示器可能直接显示你的桌面。主动锁屏会保留锁定状态。若提示权限不足，可用管理员身份启动。";
+    private const string RecoveryNote = "远程桌面断开且分身输入失效时，尝试将主桌面接回空闲的本机控制台，再检查分身输入。接回后，本机显示器可能直接显示你的桌面。主动锁屏会保留锁定状态。此功能需要管理员权限。";
+    private const string RecoveryPrivilegeHint = "未获取管理员权限，无法启用";
     private readonly bool _watchSessionChanges;
     private readonly ParentDisconnectWatch _disconnectWatch = new();
     private SettingsSwitch? _recoverParent;
+    private PaperInfoButton? _recoveryWarning;
+    private bool _recoveryRequested, _recoveryAllowed;
     private bool _registeredForSessions;
     private int _observedSessionId;
     private CancellationTokenSource? _pendingRecovery;
@@ -28,24 +31,44 @@ internal sealed partial class ParchmentPreviewForm
     /// <summary>把说明放在开关紧邻的分组标题右端，鼠标、触控和键盘均可打开。</summary>
     private void AddRecoverySettings(TableLayoutPanel options)
     {
-        TableLayoutPanel heading = new() { Dock = DockStyle.Top, Margin = Padding.Empty, AutoSize = true, ColumnCount = 2 };
+        TableLayoutPanel heading = new() { Dock = DockStyle.Top, Margin = Padding.Empty, AutoSize = true, ColumnCount = 3 };
         heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         heading.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        heading.Controls.Add(SectionHeading("会话恢复"), 0, 0);
+        heading.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        DrawerMetrics.Margin(heading, 0, SectionGap, 0, 0);
+        heading.Controls.Add(SectionHeading("主桌面恢复", compact: true), 0, 0);
+        _recoveryWarning = new PaperInfoButton(_drawerArrowFont, _labelFont, "主桌面恢复权限提示", RecoveryPrivilegeHint)
+        {
+            Text = "\uE7BA", ForeColor = Color.FromArgb(156, 109, 26), Visible = false
+        };
+        heading.Controls.Add(_recoveryWarning, 1, 0);
         heading.Controls.Add(new PaperInfoButton(_drawerArrowFont, _labelFont, "会话恢复说明", RecoveryNote,
-            "查看 Issue #5", OpenRecoveryIssue, RecoveryFooter), 1, 0);
+            "查看 Issue #5", OpenRecoveryIssue, RecoveryFooter), 2, 0);
         options.Controls.Add(heading);
         var list = new SettingsList();
-        _recoverParent = new SettingsSwitch("远程断开后接回主桌面", _bodyFont);
-        try { _recoverParent.Checked = ReadRecoveryPreference(_updatePreferenceKey); }
+        _recoverParent = new SettingsSwitch("远程断开后接回主桌面", _bodyFont) { Enabled = false };
+        try { _recoveryRequested = ReadRecoveryPreference(_updatePreferenceKey); }
         catch (Exception ex) when (ex is IOException or SecurityException or UnauthorizedAccessException)
         {
-            _recoverParent.Checked = false;
             Shown += (_, _) => AppendLog("无法读取会话恢复设置，本次启动已关闭自动接回。", LogLevel.Warning);
         }
         _recoverParent.CheckedChanged += ChangeRecoveryPreference;
         list.AddRow(_recoverParent);
         options.Controls.Add(list);
+    }
+
+    /// <summary>按当前令牌更新开关与警示。临时限制只影响本次运行，保留用户已保存的偏好。</summary>
+    private void ApplyRecoveryPrivilege(bool allowed)
+    {
+        _recoveryAllowed = allowed;
+        if (_recoverParent == null || _recoveryWarning == null) return;
+        _recoverParent.CheckedChanged -= ChangeRecoveryPreference;
+        _recoverParent.Enabled = allowed;
+        _recoverParent.Checked = allowed && _recoveryRequested;
+        _recoverParent.AccessibleDescription = allowed ? null : RecoveryPrivilegeHint;
+        _recoverParent.CheckedChanged += ChangeRecoveryPreference;
+        _recoveryWarning.Visible = !allowed;
+        if (!allowed) CancelParentRecovery();
     }
 
     /// <summary>用户激活链接时用默认浏览器打开固定的 GitHub 议题，系统未配置浏览器时记录原因。</summary>
@@ -72,8 +95,10 @@ internal sealed partial class ParchmentPreviewForm
     /// <summary>关闭立即取消本次等待，重新开启仅对以后的远程断开生效。</summary>
     private void ChangeRecoveryPreference(object? sender, EventArgs e)
     {
+        if (!_recoveryAllowed) return;
+        _recoveryRequested = _recoverParent!.Checked;
         CancelParentRecovery();
-        try { WriteRecoveryPreference(_updatePreferenceKey, _recoverParent!.Checked); }
+        try { WriteRecoveryPreference(_updatePreferenceKey, _recoveryRequested); }
         catch (Exception ex) when (ex is IOException or SecurityException or UnauthorizedAccessException)
         {
             AppendLog("会话恢复开关在本次运行中已生效，但未能保存。", LogLevel.Warning);
@@ -106,7 +131,7 @@ internal sealed partial class ParchmentPreviewForm
                 break;
             case 4: // WTS_REMOTE_DISCONNECT，与锁屏、关闭预览完全不同。
                 var child = _disconnectWatch.TakeDisconnect();
-                if (_recoverParent?.Checked == true && !_confirmingClose && !_preparingUpdate && child.HasValue)
+                if (_recoveryAllowed && _recoverParent?.Checked == true && !_confirmingClose && !_preparingUpdate && child.HasValue)
                     _ = RecoverParentAsync(child.Value);
                 break;
             case 7: // WTS_SESSION_LOCK，锁屏不能单独触发恢复。

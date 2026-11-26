@@ -26,6 +26,8 @@ internal static class Program
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        if (args is ["--privilege-drawer"]) return SettingsInteractionCheck.CheckPrivilegeAndConnect();
+        if (args.FirstOrDefault() == "--startup-inventory") return StartupInventoryCheck.Run(args.ElementAtOrDefault(1));
         if (args is ["--update-window", var image]) return UpdateWindowCheck.Run(image);
         if (args is ["--preview-update"]) return UpdateWindowCheck.Preview();
         if (args is ["--update-entries", "auto"]) return UpdateEntryTrial.Run(startup: true);
@@ -248,9 +250,9 @@ internal static class Program
 
     /// <summary>报告占用测试采样点的进程编号，便于区分窗口遮挡和错误的圆角裁切。</summary>
     [DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(nint window, out int process);
+    internal static extern uint GetWindowThreadProcessId(nint window, out int process);
 
     /// <summary>请求把本进程的验收窗设为前台；系统拒绝时，焦点断言仍会明确报告未通过。</summary>
     [DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(nint window);
+    internal static extern bool SetForegroundWindow(nint window);
 }

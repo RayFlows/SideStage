@@ -85,14 +85,16 @@ internal sealed class ReleaseUpdateFeed
     }
 
     /// <summary>先查国内源。只有镜像能确认当前或更高版本齐备时才采用其结果；关闭窗口取消所有后续请求。</summary>
-    internal async Task<ReleaseOffer?> CheckAsync(CancellationToken cancellation)
+    internal async Task<ReleaseOffer?> CheckAsync(CancellationToken cancellation, bool? includePrereleases = null)
     {
         if (!IsConfigured) throw new InvalidOperationException("此版本未配置公开发布仓库。");
+        bool previews = includePrereleases ?? Current.Channel != 3;
         if (_cnb != null)
         {
             try
             {
-                var mirror = await ReadLatestAsync(_cnb, true, cancellation).ConfigureAwait(false);
+                var mirror = await ReadLatestAsync(_cnb, true, previews, cancellation).ConfigureAwait(false);
+                if (mirror == null && _github == null) return null;
                 if (mirror == null) throw new InvalidDataException("国内源尚无此渠道的完整发行包。");
                 int comparison = mirror.Version.CompareTo(Current);
                 if (comparison > 0) return mirror;
@@ -105,12 +107,12 @@ internal sealed class ReleaseUpdateFeed
             }
         }
         cancellation.ThrowIfCancellationRequested();
-        var latest = await ReadLatestAsync(_github!, false, cancellation).ConfigureAwait(false);
+        var latest = await ReadLatestAsync(_github!, false, previews, cancellation).ConfigureAwait(false);
         return latest != null && latest.Version.CompareTo(Current) > 0 ? latest : null;
     }
 
     /// <summary>分页读取一个固定来源，找出该渠道最高版本。两个来源的分页参数、附件完成条件和发布页各不相同。</summary>
-    private async Task<ReleaseOffer?> ReadLatestAsync(string repo, bool cnb, CancellationToken cancellation)
+    private async Task<ReleaseOffer?> ReadLatestAsync(string repo, bool cnb, bool includePrereleases, CancellationToken cancellation)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(cnb ? 6 : 15));
@@ -134,7 +136,7 @@ internal sealed class ReleaseUpdateFeed
                 if (entry?.Tag is not { Length: > 0 } tag || entry.Draft != false || entry.Prerelease is null) continue;
                 ReleaseVersion? version = ReleaseVersion.Parse(tag.StartsWith('v') ? tag[1..] : tag);
                 if (version is null || version.CompareTo(best?.Version) <= 0) continue;
-                if (Current.Channel == 3 && (entry.Prerelease.Value || version.Channel != 3)) continue;
+                if (!includePrereleases && (entry.Prerelease.Value || version.Channel != 3)) continue;
                 // 只有上传完成且具有该版本的 x64 安装包才提示；源码标签、草稿和其他平台不算可更新版本。
                 if (cnb && version.CompareTo(newestMirrorTag) > 0) newestMirrorTag = version;
                 string installer = $"SideStage-{version.Text}-Setup-x64.exe";

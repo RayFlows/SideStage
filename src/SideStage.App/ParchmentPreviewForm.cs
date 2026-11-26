@@ -37,6 +37,7 @@ internal sealed partial class ParchmentPreviewForm : Form
     // ── 服务 ─────────────────────────────────────────────────────────────
     private readonly ISessionInspector _sessionInspector;
     private readonly Func<Task> _enableChildSessions;
+    private readonly Action<WindowsChildSessionCredentials> _requestPreviewConnection;
     private readonly WindowsChildSessionTerminator _sessionTerminator = new();
     private readonly WindowsChildSessionCredentialStore _credentialStore;
     private readonly string _logDirectory, _logFile;
@@ -105,14 +106,18 @@ internal sealed partial class ParchmentPreviewForm : Form
     internal ParchmentPreviewForm(WindowsChildSessionCredentialStore credentialStore, string? logDirectory = null,
         Action<string>? openFolder = null, bool pollSessions = true, ISessionInspector? sessionInspector = null,
         Func<Task>? enableChildSessions = null, ReleaseUpdateFeed? updateFeed = null, string updatePreferenceKey = UpdatePreferenceKey,
-        bool canReturnToLauncher = false, bool openUpdate = false)
+        bool canReturnToLauncher = false, bool openUpdate = false, Action<WindowsChildSessionCredentials>? requestPreviewConnection = null)
     {
         _updates = updateFeed ?? ReleaseUpdateFeed.FromBuild();
         _updatePreferenceKey = updatePreferenceKey;
+        _startupInventory = new StartupInventory(logDirectory == null
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SideStage", "StartupInventory")
+            : Path.Combine(logDirectory, "StartupInventory"));
         _canReturnToLauncher = canReturnToLauncher;
         _watchSessionChanges = pollSessions && sessionInspector is null;
         _sessionInspector = sessionInspector ?? new WindowsSessionInspector();
         _enableChildSessions = enableChildSessions ?? ChildSessionEnableCommand.EnableAsync;
+        _requestPreviewConnection = requestPreviewConnection ?? _previewPanel.PreviewControl.ConnectPreview;
         _credentialStore = credentialStore;
         // 沿用首版日志目录，保证升级前后的「打开日志文件夹」指向同一段历史。
         _logDirectory = logDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -140,6 +145,7 @@ internal sealed partial class ParchmentPreviewForm : Form
             RefreshSessionStatus();
             if (openUpdate) _ = CheckUpdatesAsync();
             else if (_startupUpdates?.Checked == true) _ = CheckUpdatesAsync(startup: true);
+            if (_startupInventory.Preferences().OnLaunch) _ = ScanStartupItemsAsync();
         };
         if (pollSessions) ConfigureRefreshTimer();
         RefreshSessionStatus();
@@ -219,7 +225,7 @@ internal sealed partial class ParchmentPreviewForm : Form
         _settingsDrawer.VisibleChanged += (_, _) =>
         {
             RestorePaintedRim();
-            if (!_settingsDrawer.Visible) LeaveCredentialPage();
+            if (!_settingsDrawer.Visible) LeaveDrawerPage();
             PositionSettingsDrawer();
             _drawerTab.Visible = _settingsDrawer.Visible;
             if (_drawerTab.Visible)
@@ -478,7 +484,7 @@ internal sealed partial class ParchmentPreviewForm : Form
             Circular = true, ForeColor = TextMuted, Anchor = AnchorStyles.Left,
             Margin = Padding.Empty, Visible = false,
         };
-        _drawerBack.Click += (_, _) => LeaveCredentialPage();
+        _drawerBack.Click += (_, _) => LeaveDrawerPage();
         _commandHints.SetToolTip(_drawerBack, "返回高级设置");
         heading.Controls.Add(_drawerBack, 0, 0);
         _drawerTitle = new Label { Text = "高级设置", Font = _drawerTitleFont, ForeColor = TextOnLight, AutoSize = true,
@@ -503,23 +509,13 @@ internal sealed partial class ParchmentPreviewForm : Form
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         overview.SetPageContent(options);
         _drawerPages.Controls.Add(_overview);
-        options.Controls.Add(SectionHeading("画面与声音"));
-        options.Controls.Add(BuildCompactSettingsPanel());
-        options.Controls.Add(SettingsCaption.Footnote(
-            "连接中切换静音会自动重连。缩放和宽高比即时生效，更改分辨率需先断开。", _labelFont));
-        SettingsList account = new(16, 6);
-        _credentialsRow = new SettingsActionRow("登录凭据", _bodyFont, ManageCredentials, disclosure: true);
-        account.AddRow(_credentialsRow);
-        options.Controls.Add(account);
-        AddStartupPermissionSetting(options);
-        AddRecoverySettings(options);
-
         // 两个入口沿用系统菜单的状态与处理函数，注销前仍展示目标编号和默认取消的确认框。
         TableLayoutPanel session = new() { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1,
             Margin = Padding.Empty, Visible = false };
         session.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        DrawerMetrics.Margin(session, 0, 0, 0, SectionGap);
         _sessionCommands = session;
-        session.Controls.Add(SectionHeading("会话操作"));
+        session.Controls.Add(SectionHeading("当前会话", compact: true));
         SettingsList commands = new();
         _disconnectCommand = new SettingsActionRow("断开连接", _bodyFont, DisconnectPreview);
         _logoffCommand = new SettingsActionRow("注销子会话…", _bodyFont, LogoffChildSession);
@@ -528,6 +524,20 @@ internal sealed partial class ParchmentPreviewForm : Form
         commands.AddRow(_logoffCommand);
         session.Controls.Add(commands);
         options.Controls.Add(session);
+        options.Controls.Add(SectionHeading("画面与声音", compact: true));
+        options.Controls.Add(BuildCompactSettingsPanel());
+        options.Controls.Add(SettingsCaption.Footnote(
+            "连接中切换静音会自动重连。缩放和宽高比即时生效，更改分辨率需先断开。", _labelFont));
+        options.Controls.Add(SectionHeading("分身登录"));
+        SettingsList account = new();
+        _credentialsRow = new SettingsActionRow("登录凭据", _bodyFont, ManageCredentials, disclosure: true);
+        account.AddRow(_credentialsRow);
+        _startupInventoryRow = new SettingsActionRow("分身启动项", _bodyFont, OpenStartupInventory, disclosure: true);
+        account.AddRow(_startupInventoryRow);
+        options.Controls.Add(account);
+        AddRecoverySettings(options);
+        options.Controls.Add(SectionHeading("SideStage"));
+        AddStartupPermissionSetting(options);
         AddUpdateSettings(options);
         options.ResumeLayout(true);
         layout.Controls.Add(_drawerPages, 0, 1);
@@ -542,7 +552,7 @@ internal sealed partial class ParchmentPreviewForm : Form
         };
         logHeading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         logHeading.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        logHeading.Controls.Add(SectionHeading("活动日志"), 0, 0);
+        logHeading.Controls.Add(SectionHeading("活动日志", compact: true), 0, 0);
         logHeading.Controls.Add(new ActivityLogInfoButton(_drawerArrowFont, _labelFont, OpenLogDirectory), 1, 0);
         layout.Controls.Add(logHeading, 0, 2);
         _eventLog = new ActivityLogView
@@ -559,12 +569,14 @@ internal sealed partial class ParchmentPreviewForm : Form
         return drawer;
     }
 
-    /// <summary>以统一的粗体字级和上下间距区分抽屉中的设置分组。</summary>
-    private Label SectionHeading(string text)
+    private const int SectionGap = 12;
+
+    /// <summary>在相邻设置组之间增加留白。页首、固定日志及自带外间距的组合标题使用紧凑上边距。</summary>
+    private Label SectionHeading(string text, bool compact = false)
     {
         SettingsCaption caption = new() { Text = text, AutoSize = true, Font = _sectionFont,
             Anchor = AnchorStyles.Left, ForeColor = TextOnLight };
-        DrawerMetrics.Margin(caption, PaperFieldSurface.TextInset, 4, 0, 8);
+        DrawerMetrics.Margin(caption, PaperFieldSurface.TextInset, compact ? 4 : 4 + SectionGap, 0, 8);
         return caption;
     }
 
@@ -613,27 +625,40 @@ internal sealed partial class ParchmentPreviewForm : Form
         return new Rectangle(area.Width - width, 0, width, area.Height);
     }
 
-    // ── 操作：连接 ───────────────────────────────────────────────────────
+    /// <summary>读取已保存的凭据或打开输入页。准备好凭据后再收起侧栏并请求连接。</summary>
     private void ConnectPreview(object? sender, EventArgs e)
     {
         try
         {
             using WindowsChildSessionCredentials? saved = _credentialStore.Read();
-            if (saved is not null)
-            {
-                _previewPanel.PreviewControl.ConnectPreview(saved);
-                AppendLog("已使用本机保存的登录凭据请求连接子会话。");
-            }
-            else
+            if (saved is null)
             {
                 OpenCredentialPage(connectAfterSubmit: true, hasSavedCredentials: false);
                 return;
             }
+            StartPreviewConnection(saved, "已使用本机保存的登录凭据请求连接子会话。");
         }
         catch (Exception ex) when (IsDisplayable(ex))
         {
             ShowError("无法连接子会话", ex);
+            RefreshSessionStatus();
         }
+    }
+
+    /// <summary>先完成侧栏收起和首页重绘，再调用 RDP。错误由主窗口呈现，此时凭据编辑页已释放。</summary>
+    private void StartPreviewConnection(WindowsChildSessionCredentials credentials, string logMessage)
+    {
+        if (_settingsDrawer?.Visible == true)
+        {
+            ToggleSettings(this, EventArgs.Empty);
+            _workspace?.Update();
+        }
+        try
+        {
+            _requestPreviewConnection(credentials);
+            AppendLog(logMessage);
+        }
+        catch (Exception ex) when (IsDisplayable(ex)) { ShowError("无法连接子会话", ex); }
         RefreshSessionStatus();
     }
 
@@ -655,7 +680,7 @@ internal sealed partial class ParchmentPreviewForm : Form
     {
         if (_settingsDrawer is null || _drawerPages is null) return;
         if (!_settingsDrawer.Visible) ToggleSettings(this, EventArgs.Empty);
-        LeaveCredentialPage();
+        LeaveDrawerPage();
         _editor = new InlineCredentialEditor(_bodyFont, _labelFont, connectAfterSubmit, hasSavedCredentials,
             (credentials, persist) =>
             {
@@ -664,9 +689,13 @@ internal sealed partial class ParchmentPreviewForm : Form
                     _credentialStore.Save(credentials);
                     RefreshCredentialCheck();
                 }
-                if (connectAfterSubmit) _previewPanel.PreviewControl.ConnectPreview(credentials);
-                AppendLog(connectAfterSubmit ? "已发出 RDP 连接请求。" : "已更新本机登录凭据。");
-                LeaveCredentialPage();
+                if (connectAfterSubmit)
+                {
+                    StartPreviewConnection(credentials, "已发出 RDP 连接请求。");
+                    return;
+                }
+                AppendLog("已更新本机登录凭据。");
+                LeaveDrawerPage();
                 RefreshSessionStatus();
             }, () =>
             {
@@ -682,16 +711,19 @@ internal sealed partial class ParchmentPreviewForm : Form
         _drawerBack.Focus();
     }
 
-    /// <summary>退出编辑页时销毁密码输入框，返回设置列表并恢复原来的键盘入口。</summary>
-    private void LeaveCredentialPage()
+    /// <summary>释放当前子页和可能存在的密码输入框，返回高级设置并恢复相应入口的焦点。</summary>
+    private void LeaveDrawerPage()
     {
-        if (_editor == null) return;
-        _editor.Dispose();
+        if (_editor == null && _startupPage == null) return;
+        Button? entry = _editor == null ? _startupInventoryRow : _credentialsRow;
+        _editor?.Dispose();
         _editor = null;
+        _startupPage?.Dispose();
+        _startupPage = null;
         _overview!.Visible = true;
         _drawerTitle!.Text = "高级设置";
         _drawerBack!.Visible = false;
-        if (_settingsDrawer?.Visible == true) _credentialsRow?.Focus();
+        if (_settingsDrawer?.Visible == true) entry?.Focus();
     }
 
     // ── 操作：断开 ───────────────────────────────────────────────────────

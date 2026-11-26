@@ -29,6 +29,9 @@ internal sealed class ReleaseUpdateWindow : Form
     private VerifiedUpdate? _verified;
     private bool _installing;
 
+    /// <summary>用户已经确认下载或安装，此时修改以后接收的更新渠道应保留这次操作。</summary>
+    internal bool HasAcceptedUpdate => _transfer != null || _verified != null || _installing;
+
     /// <summary>仅渲染已解析的纯文本。下载、交接及跳过行为由主窗口注入，可离线验收，不接触真实会话。</summary>
     internal ReleaseUpdateWindow(ReleaseVersion current, ReleaseOffer offer,
         Func<UpdateSource, IProgress<int>, CancellationToken, Task<VerifiedUpdate>> download,
@@ -85,7 +88,7 @@ internal sealed class ReleaseUpdateWindow : Form
         _cancel.Visible = false;
         _primary.Click += async (_, _) => await RunPrimaryAsync();
         _later.Click += (_, _) => Hide();
-        _skip.Click += (_, _) => { skip(); Hide(); };
+        _skip.Click += (_, _) => { Hide(); skip(); };
         _cancel.Click += (_, _) => _transfer?.Cancel();
         CancelButton = _later;
         Shown += (_, _) => _later.Focus();

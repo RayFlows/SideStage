@@ -18,18 +18,16 @@ internal sealed class ActivityLogInfoButton : PaperInfoButton
 internal class PaperInfoButton : Button
 {
     private readonly PaperHintBubble _popup;
-    private readonly LinkLabel _link;
-    private readonly Action _openLink;
+    private readonly LinkLabel? _link;
     private readonly System.Windows.Forms.Timer _leaveTimer = new() { Interval = 300 };
     private bool _keyboardOpen;
     /// <summary>当前已展开气泡的实际屏幕范围，包含 Windows 对位置的自动调整。</summary>
     internal Rectangle BubbleBounds => _popup.Visible ? _popup.Bounds : Rectangle.Empty;
 
     /// <summary>按正文、原生链接、补充说明的顺序布局。链接目标和打开动作由调用方提供。</summary>
-    internal PaperInfoButton(Font iconFont, Font bodyFont, string title, string note, string linkText, Action openLink,
+    internal PaperInfoButton(Font iconFont, Font bodyFont, string title, string note, string? linkText = null, Action? openLink = null,
         string? footer = null)
     {
-        _openLink = openLink;
         Text = "\uE946";
         Font = iconFont;
         AccessibleName = title;
@@ -44,16 +42,27 @@ internal class PaperInfoButton : Button
         Color surface = PaperHintBubble.Surface;
         TableLayoutPanel content = new()
         {
-            ColumnCount = 1, RowCount = footer is null ? 2 : 3, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
             BackColor = surface, Font = bodyFont,
         };
         DrawerMetrics.Bind(content, () => content.Padding = DrawerMetrics.Space(content, 12, 9, 14, 10));
         content.Controls.Add(CreateParagraph(note), 0, 0);
-        _link = new LinkLabel { Text = $"{linkText}  ›", AutoSize = true, Font = bodyFont,
-            LinkBehavior = LinkBehavior.HoverUnderline, LinkColor = Color.FromArgb(184, 225, 211),
-            ActiveLinkColor = Color.White, AccessibleName = linkText };
-        content.Controls.Add(_link, 0, 1);
-        DrawerMetrics.Margin(_link, 0, 5, 0, 0);
+        if (linkText != null && openLink != null)
+        {
+            _link = new LinkLabel { Text = $"{linkText}  ›", AutoSize = true, Font = bodyFont,
+                LinkBehavior = LinkBehavior.HoverUnderline, LinkColor = Color.FromArgb(184, 225, 211),
+                ActiveLinkColor = Color.White, AccessibleName = linkText };
+            content.Controls.Add(_link, 0, 1);
+            DrawerMetrics.Margin(_link, 0, 5, 0, 0);
+            _link.LinkClicked += (_, _) => OpenFromBubble(openLink);
+            _link.PreviewKeyDown += (_, e) => { if (e.KeyData == Keys.Enter) e.IsInputKey = true; };
+            _link.KeyDown += (_, e) =>
+            {
+                if (e.KeyData != Keys.Enter) return;
+                e.SuppressKeyPress = true;
+                OpenFromBubble(openLink);
+            };
+        }
         if (footer != null)
         {
             Label last = CreateParagraph(footer);
@@ -62,14 +71,6 @@ internal class PaperInfoButton : Button
         }
         _popup = new PaperHintBubble(this);
         _popup.Items.Add(new ToolStripControlHost(content) { Padding = Padding.Empty, Margin = Padding.Empty });
-        _link.LinkClicked += (_, _) => OpenFromBubble();
-        _link.PreviewKeyDown += (_, e) => { if (e.KeyData == Keys.Enter) e.IsInputKey = true; };
-        _link.KeyDown += (_, e) =>
-        {
-            if (e.KeyData != Keys.Enter) return;
-            e.SuppressKeyPress = true;
-            OpenFromBubble();
-        };
         _popup.Closed += (_, _) => { _leaveTimer.Stop(); _keyboardOpen = false; };
         _leaveTimer.Tick += (_, _) =>
         {
@@ -90,25 +91,27 @@ internal class PaperInfoButton : Button
     }
 
     /// <summary>关闭说明并打开对应链接。键盘打开时先把焦点交还入口，便于返回后继续浏览。</summary>
-    private void OpenFromBubble()
+    private void OpenFromBubble(Action openLink)
     {
         if (!_popup.Visible) return;
         bool restoreFocus = _keyboardOpen;
         _popup.Close();
         if (restoreFocus && CanFocus) Focus();
-        _openLink();
+        openLink();
     }
 
     /// <summary>让气泡右缘与图标对齐。键盘激活时将焦点移给链接，鼠标悬停时保留当前操作。</summary>
     private void ShowBubble(bool focusLink)
     {
         _keyboardOpen = focusLink;
+        // 悬停不取得焦点，避免菜单在弹出时因系统焦点消息立即消失。键盘打开才启用原生菜单退出行为。
+        _popup.AutoClose = focusLink;
         if (!_popup.Visible)
         {
             _popup.Show(this, new Point(Width, Height), ToolStripDropDownDirection.BelowLeft);
             _popup.UpdateEdge();
         }
-        if (focusLink) _link.Focus();
+        if (focusLink) _link?.Focus();
         _leaveTimer.Start();
     }
 

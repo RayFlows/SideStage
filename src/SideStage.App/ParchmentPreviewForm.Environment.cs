@@ -25,7 +25,6 @@ internal sealed partial class ParchmentPreviewForm
     /// </summary>
     private void AddStartupPermissionSetting(TableLayoutPanel options)
     {
-        options.Controls.Add(SectionHeading("启动权限"));
         var list = new SettingsList();
         var request = new SettingsSwitch("启动时请求管理员权限", _bodyFont)
         {
@@ -47,7 +46,7 @@ internal sealed partial class ParchmentPreviewForm
         list.AddRow(request);
         options.Controls.Add(list);
         options.Controls.Add(SettingsCaption.Footnote(
-            "建议开启，以便远程桌面断开后自动接回主桌面。更改在下次启动时生效。取消授权后，本次以普通权限打开。", _labelFont));
+            "建议开启，否则某些功能无法使用。", _labelFont));
     }
 
     /// <summary>
@@ -69,13 +68,14 @@ internal sealed partial class ParchmentPreviewForm
     /// </summary>
     internal void DisplayPrivilegeCheck(bool? administrator)
     {
+        ApplyRecoveryPrivilege(administrator == true);
         if (_privilegeText is null) return;
         var (level, status, detail) = administrator switch
         {
             true => (CheckResult.Ok, "管理员", "SideStage 正以管理员身份运行。会话恢复仍需本机控制台空闲。"),
-            false => (CheckResult.Warn, "普通权限 · 会话恢复可能受限",
-                "可正常连接分身。需要远程断开后自动接回主桌面时，建议在连接前右键 SideStage，选择“以管理员身份运行”。"),
-            null => (CheckResult.Warn, "权限未知", "无法读取本次运行的权限。会话恢复结果请查看活动日志。"),
+            false => (CheckResult.Warn, "普通权限 · 主桌面恢复已停用",
+                "可正常连接分身。如需启用主桌面恢复，请以管理员身份运行。"),
+            null => (CheckResult.Warn, "权限未知", "无法确认本次运行的管理员权限，主桌面恢复已停用。"),
         };
         SetEnvironmentCheck(_privilegeIcon, _privilegeText, level, status, detail);
         _privilegeText.AccessibleDescription = detail;

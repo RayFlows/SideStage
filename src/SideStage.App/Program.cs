@@ -40,6 +40,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args is [ChildSessionEnableCommand.Argument]) return ChildSessionEnableCommand.EnableOnce();
+        if (args is ["--restore-startup-items"]) return new StartupRegistrations().RestoreAll();
         string sid;
         using (var identity = WindowsIdentity.GetCurrent())
             sid = identity.User?.Value ?? throw new InvalidOperationException("无法识别当前 Windows 用户。");
@@ -48,6 +49,7 @@ internal static class Program
         if (route == StartupRoute.Exit) return 0;
         if (route == StartupRoute.DifferentAccount) return StartupElevation.DifferentAccountExitCode;
         ApplicationConfiguration.Initialize();
+        using var startupBroker = new StartupSessionBroker();
 
         // 两种界面的默认布局不同，分别记住各自的主窗口大小。
         bool classic = args.Contains("--classic");
