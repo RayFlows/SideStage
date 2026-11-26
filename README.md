@@ -12,6 +12,8 @@
   <a href="https://github.com/RayFlows/SideStage/releases"><img alt="GitHub 下载量" src="https://img.shields.io/github/downloads/RayFlows/SideStage/total?style=flat-square&amp;logo=github&amp;label=downloads&amp;color=1E9BFA" /></a>
 </p>
 
+<p align="center">⭐ 喜欢项目的话，感谢您点一个Star啦~</p>
+
 利用RDP回环连接，把本机的 Windows 子会话连进一个普通窗口，此时该窗口的模拟输入事件将不会再影响主桌面的输入（也就是不抢鼠标和窗口聚焦了），同时关闭物理显示器之后也不会再影响在子会话中进行窗口捕捉的脚本与应用。
 
 ![环境检查](./images/home.png)
