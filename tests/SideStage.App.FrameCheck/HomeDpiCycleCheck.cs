@@ -43,6 +43,7 @@ internal static class HomeDpiCycleCheck
             var toggle = Children(window).OfType<SettingsSwitch>().Single(c => c.Text == "保持宽高比");
             if (Math.Abs(toggle.Height - 36 * dpi / 96d) > 2)
                 throw new InvalidOperationException($"设置开关在 {dpi} DPI 下的行高错误：{toggle.Height}。");
+            CheckPermissionFootnote(window);
             DrawerLayoutCheck.CheckTab(collapse);
             collapse.PerformClick();
             if (dpi != 192) continue;
@@ -62,6 +63,22 @@ internal static class HomeDpiCycleCheck
         if (preview.TryMapToRemotePoint(new Point(12, 14)) != new Point(92, 84) ||
             preview.TryMapToRemotePoint(new Point(wrapper.Width - 1, 30)) != null)
             throw new InvalidOperationException("滚动后的预览坐标或滑块命中错误。");
+    }
+
+    /// <summary>启动权限的建议应紧跟所属开关，并给当前字体的每一行说明留足高度。</summary>
+    private static void CheckPermissionFootnote(Form window)
+    {
+        var toggle = Children(window).OfType<SettingsSwitch>().Single(s => s.Text == "启动时请求管理员权限");
+        var group = (SettingsList)toggle.Parent!;
+        var options = (TableLayoutPanel)group.Parent!;
+        int row = options.GetPositionFromControl(group).Row;
+        var note = options.GetControlFromPosition(0, row + 1) as SettingsCaption;
+        if (note == null || !note.Visible || !note.Text.StartsWith("建议开启", StringComparison.Ordinal))
+            throw new InvalidOperationException("启动权限开关下方缺少开启建议。");
+        int height = TextRenderer.MeasureText(note.Text, note.Font, new Size(note.ClientSize.Width, int.MaxValue),
+            TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak).Height;
+        if (height > note.ClientSize.Height)
+            throw new InvalidOperationException($"权限说明在 {window.DeviceDpi} DPI 下需要 {height}px，实际 {note.ClientSize.Height}px。");
     }
 
     /// <summary>核对裁切区完全遮蔽两个原生非客户区；拖到两轴末端后再回到开头。</summary>

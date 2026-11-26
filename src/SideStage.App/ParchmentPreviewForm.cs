@@ -58,6 +58,7 @@ internal sealed partial class ParchmentPreviewForm : Form
     private Label?  _checkCapabilityText;
     private Label?  _checkParentIcon;
     private Label?  _checkParentText;
+    private Label?  _childSessionIcon, _childSessionText;
     private Label?  _connectionIcon, _connectionText;
     private Label?  _checkRdpIcon, _checkRdpText;
     private Label?  _checkCredentialIcon, _checkCredentialText;
@@ -103,10 +104,12 @@ internal sealed partial class ParchmentPreviewForm : Form
     /// <summary>建立实际主窗口。正式入口使用构建指定的更新源及用户偏好；界面验收可隔离凭据、发行数据和更新偏好。</summary>
     internal ParchmentPreviewForm(WindowsChildSessionCredentialStore credentialStore, string? logDirectory = null,
         Action<string>? openFolder = null, bool pollSessions = true, ISessionInspector? sessionInspector = null,
-        Func<Task>? enableChildSessions = null, ReleaseUpdateFeed? updateFeed = null, string updatePreferenceKey = UpdatePreferenceKey)
+        Func<Task>? enableChildSessions = null, ReleaseUpdateFeed? updateFeed = null, string updatePreferenceKey = UpdatePreferenceKey,
+        bool canReturnToLauncher = false, bool openUpdate = false)
     {
         _updates = updateFeed ?? ReleaseUpdateFeed.FromBuild();
         _updatePreferenceKey = updatePreferenceKey;
+        _canReturnToLauncher = canReturnToLauncher;
         _watchSessionChanges = pollSessions && sessionInspector is null;
         _sessionInspector = sessionInspector ?? new WindowsSessionInspector();
         _enableChildSessions = enableChildSessions ?? ChildSessionEnableCommand.EnableAsync;
@@ -126,6 +129,7 @@ internal sealed partial class ParchmentPreviewForm : Form
 
         BuildWindowFrame();
         BuildLayout();
+        RefreshPrivilegeCheck();
         BindBackgroundClicks(this);
         // 首次显示后才准备原生控件；从 Windows 凭据管理器切回时也能看到外部修改。
         Activated += RefreshOnActivation;
@@ -134,7 +138,8 @@ internal sealed partial class ParchmentPreviewForm : Form
             ShowWindowsEdition();
             if (_checkCredentialText?.Text.Length == 0) RefreshCredentialCheck();
             RefreshSessionStatus();
-            if (_startupUpdates?.Checked == true) _ = CheckUpdatesAsync(startup: true);
+            if (openUpdate) _ = CheckUpdatesAsync();
+            else if (_startupUpdates?.Checked == true) _ = CheckUpdatesAsync(startup: true);
         };
         if (pollSessions) ConfigureRefreshTimer();
         RefreshSessionStatus();
@@ -238,7 +243,7 @@ internal sealed partial class ParchmentPreviewForm : Form
     /// <summary>将会话检查和操作居中排在整张纸面上，保持中文字段和值便于扫读的行宽。</summary>
     private Panel BuildCenterCard()
     {
-        const int checkCount = 6;
+        const int checkCount = 8;
         // 纸页自己绘制整张背景。透明底只用于中央小表，拖动时无需逐层回调父窗口重画整页。
         PaperSurface container = new() { Margin = Padding.Empty, AutoScroll = true };
         _homePaper = container;
@@ -249,6 +254,8 @@ internal sealed partial class ParchmentPreviewForm : Form
             AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 3, RowCount = checkCount + 2,
         };
+        // 先装好所有行再测量，避免每增加一个状态标签都让整表重新选取列宽。
+        card.SuspendLayout();
         card.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         card.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         card.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -270,11 +277,13 @@ internal sealed partial class ParchmentPreviewForm : Form
         _editionIndicator = new EditionIndicator(_labelFont, _drawerArrowFont);
         (_, _systemText) = AddCheckRow(card, 1, "操作系统", statusIcon: _editionIndicator);
         _systemText.Text = "正在读取…";
-        (_checkCapabilityIcon, _checkCapabilityText) = AddCheckRow(card, 2, "子会话功能", _enableChildButton);
-        (_checkRdpIcon, _checkRdpText) = AddCheckRow(card, 3, "本机远程桌面");
-        (_checkParentIcon, _checkParentText) = AddCheckRow(card, 4, "主桌面");
-        (_connectionIcon, _connectionText) = AddCheckRow(card, 5, "RDP 连接");
-        (_checkCredentialIcon, _checkCredentialText) = AddCheckRow(card, 6, "登录凭据", _configureCredentialsButton);
+        (_privilegeIcon, _privilegeText) = AddCheckRow(card, 2, "运行权限");
+        (_checkCapabilityIcon, _checkCapabilityText) = AddCheckRow(card, 3, "子会话功能", _enableChildButton);
+        (_checkRdpIcon, _checkRdpText) = AddCheckRow(card, 4, "本机远程桌面");
+        (_checkParentIcon, _checkParentText) = AddCheckRow(card, 5, "主桌面");
+        (_childSessionIcon, _childSessionText) = AddCheckRow(card, 6, "当前子会话");
+        (_connectionIcon, _connectionText) = AddCheckRow(card, 7, "RDP 连接");
+        (_checkCredentialIcon, _checkCredentialText) = AddCheckRow(card, 8, "登录凭据", _configureCredentialsButton);
 
         // 主连接按钮
         _connectButton = new PaperCommandButton
@@ -302,6 +311,7 @@ internal sealed partial class ParchmentPreviewForm : Form
         commands.Controls.Add(advanced);
         card.Controls.Add(commands, 0, card.RowCount - 1);
         card.SetColumnSpan(commands, 3);
+        card.ResumeLayout(true);
         ConfigureHomeLayout(container, card, title, commands);
         return viewport;
     }
@@ -370,6 +380,8 @@ internal sealed partial class ParchmentPreviewForm : Form
     private void ToggleSettings(object? sender, EventArgs e)
     {
         if (_settingsDrawer == null) return;
+        if (!_settingsDrawer.Visible && _workspace != null)
+            _settingsDrawer.Bounds = GetDrawerBounds(_workspace.ClientSize);
         _settingsDrawer.Visible = !_settingsDrawer.Visible;
         if (_gear != null) _gear.Visible = _centerCard?.Visible == false && !_settingsDrawer.Visible;
         if (_settingsDrawer.Visible)
@@ -486,6 +498,8 @@ internal sealed partial class ParchmentPreviewForm : Form
         _overview = overview;
         TableLayoutPanel options = new() { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1, Margin = Padding.Empty };
+        // 分组全部就位后统一计算说明文字的换行和滚动范围。
+        options.SuspendLayout();
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         overview.SetPageContent(options);
         _drawerPages.Controls.Add(_overview);
@@ -497,6 +511,7 @@ internal sealed partial class ParchmentPreviewForm : Form
         _credentialsRow = new SettingsActionRow("登录凭据", _bodyFont, ManageCredentials, disclosure: true);
         account.AddRow(_credentialsRow);
         options.Controls.Add(account);
+        AddStartupPermissionSetting(options);
         AddRecoverySettings(options);
 
         // 两个入口沿用系统菜单的状态与处理函数，注销前仍展示目标编号和默认取消的确认框。
@@ -514,6 +529,7 @@ internal sealed partial class ParchmentPreviewForm : Form
         session.Controls.Add(commands);
         options.Controls.Add(session);
         AddUpdateSettings(options);
+        options.ResumeLayout(true);
         layout.Controls.Add(_drawerPages, 0, 1);
         TableLayoutPanel logHeading = new() { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 2, RowCount = 1 };
@@ -584,11 +600,17 @@ internal sealed partial class ParchmentPreviewForm : Form
             _centerCard.Dock = DockStyle.Fill;
             return;
         }
-        int width = Math.Min(area.Width, LogicalToDeviceUnits(348));
-        _settingsDrawer.Bounds = new Rectangle(area.Width-width, 0, width, area.Height);
+        _settingsDrawer.Bounds = GetDrawerBounds(area);
         _drawerTab?.PlaceAt(_settingsDrawer);
         _centerCard.Dock = DockStyle.Left;
-        _centerCard.Width = area.Width - width;
+        _centerCard.Width = _settingsDrawer.Left;
+    }
+
+    /// <summary>用工作区的实际尺寸定位侧栏。首次显示前即可排好隐藏控件，避免在默认的小面板上先排一次。</summary>
+    private Rectangle GetDrawerBounds(Size area)
+    {
+        int width = Math.Min(area.Width, LogicalToDeviceUnits(348));
+        return new Rectangle(area.Width - width, 0, width, area.Height);
     }
 
     // ── 操作：连接 ───────────────────────────────────────────────────────
@@ -858,20 +880,30 @@ internal sealed partial class ParchmentPreviewForm : Form
         if (_refreshInProgress || _confirmingClose || IsDisposed) return;
         _refreshInProgress = true;
         bool? capability = null;
+        RdpPreviewConnectionState? observedConnection = null;
+        bool childWasRead = false;
         try
         {
+            // 先取得本窗口的连接状态。即使随后 Windows 拒绝查询子会话，也能展示这个结果。
+            RdpPreviewConnectionState prev = _rdpPrepared ? _previewPanel.PreviewControl.GetConnectionState()
+                : RdpPreviewConnectionState.Disconnected;
+            observedConnection = prev;
             RefreshLocalRdpCheck();
             bool enabled = _sessionInspector.IsChildSessionsEnabled();
             capability = enabled;
             UpdateCapabilityCheck(enabled);
             SessionSnapshot parent         = _sessionInspector.GetCurrentSession();
             SessionSnapshot? child         = _sessionInspector.TryGetChildSession();
+            childWasRead = true;
+            UpdateCheckItem(_childSessionIcon, _childSessionText,
+                child is null ? CheckResult.Pending : child.IsDesktopReady ? CheckResult.Ok : CheckResult.Warn,
+                child is null ? "无子会话" : DescribeSession(child));
             _childNeedsUnlock              = child?.IsLocked == true;
-            RdpPreviewConnectionState prev = _rdpPrepared ? _previewPanel.PreviewControl.GetConnectionState()
-                : RdpPreviewConnectionState.Disconnected;
 
             if (_audioReconnect.Active)
             {
+                // 音频切换可能发起一次新连接，之前采到的客户端状态已经过期。
+                observedConnection = null;
                 try
                 {
                     if (_audioReconnect.Poll(_previewPanel.PreviewControl, child, _credentialStore) is { } progress)
@@ -879,6 +911,7 @@ internal sealed partial class ParchmentPreviewForm : Form
                 }
                 catch (Exception ex) when (IsDisplayable(ex)) { AppendLog($"音频重连失败：{ex.Message}", LogLevel.Error); }
                 prev = _previewPanel.PreviewControl.GetConnectionState();
+                observedConnection = prev;
             }
 
             // 环境检查指示
@@ -893,7 +926,7 @@ internal sealed partial class ParchmentPreviewForm : Form
             UpdateSettingsAvailability(prev);
 
             // 子会话核验
-            bool verified = false;
+            SessionId? verifiedTarget = null;
             string? verificationMessage = null;
             if (prev == RdpPreviewConnectionState.Connected)
             {
@@ -906,7 +939,7 @@ internal sealed partial class ParchmentPreviewForm : Form
                         AppendLog(msg);
                         _lastVerifiedChild = msg;
                     }
-                    verified = true;
+                    verifiedTarget = verifiedChild.Id;
                     _lastTransientStatus = string.Empty;
                 }
                 catch (InvalidOperationException ex)
@@ -923,8 +956,9 @@ internal sealed partial class ParchmentPreviewForm : Form
                 _lastTransientStatus = string.Empty;
             }
 
+            bool verified = verifiedTarget.HasValue;
             if (_registeredForSessions && _recoverParent?.Checked == true)
-                _disconnectWatch.Observe(parent, verified ? _previewPanel.PreviewControl.VerifiedConnectionTarget : null);
+                _disconnectWatch.Observe(parent, verifiedTarget);
 
             // 告知面板当前状态，让它控制 AxHost 可用性和空状态遮罩
             _previewPanel.SetPreviewState(
@@ -947,7 +981,7 @@ internal sealed partial class ParchmentPreviewForm : Form
                 }
             }
 
-            UpdateHeaderStatus(prev, verified, child);
+            UpdateHeaderStatus(prev, verifiedTarget);
             bool targetMatches = disconnected || _previewPanel.PreviewControl.VerifiedConnectionTarget == child?.Id;
             UpdateSessionCommands(!disconnected || _audioReconnect.Active, targetMatches && child is { IsChildSession: true, StateQueryError: null } && child.Id != parent.Id);
             SwitchMainView(prev);
@@ -969,10 +1003,10 @@ internal sealed partial class ParchmentPreviewForm : Form
             _lastPollError = ex.Message;
             if (capability is null) UpdateCapabilityCheck(null);
             UpdateCheckItem(_checkParentIcon, _checkParentText, CheckResult.Error, "状态未确认");
-            UpdateCheckItem(_connectionIcon, _connectionText, CheckResult.Error, "状态未确认");
+            if (!childWasRead) UpdateCheckItem(_childSessionIcon, _childSessionText, CheckResult.Error, "无法确认");
             _previewPanel.SetPreviewUnavailable($"无法读取 Windows 会话状态\r\n{ex.Message}");
             SwitchMainView(RdpPreviewConnectionState.Disconnected);
-            Text = $"{Program.DisplayName} — 会话状态不可用";
+            UpdateHeaderStatus(observedConnection, null);
             if (_connectButton   != null) _connectButton.Enabled   = false;
             UpdateSessionCommands(false, false);
             if (_muteAudioToggle != null) _muteAudioToggle.Enabled = false;
@@ -980,20 +1014,23 @@ internal sealed partial class ParchmentPreviewForm : Form
         finally { _refreshInProgress = false; }
     }
 
-    /// <summary>为纸页展示会话编号及中文状态，无法识别的值保留原枚举以便诊断。</summary>
+    /// <summary>将 Windows 返回的会话编号和状态呈现在纸页上。已取得编号但详情读取失败时保留错误码。</summary>
     private static string DescribeSession(SessionSnapshot session)
     {
         if (session.StateQueryError is int error)
             return $"会话 {session.Id.Value} · 状态待确认（{error}）";
         string state = session.ConnectionState switch
         {
-            SessionConnectionState.Active => session.IsLocked switch { true => "已锁定", false => "活动中", null => "锁定状态未知" },
+            SessionConnectionState.Active => session.IsLocked switch { true => "已锁定", false => "活动中", null => "活动中（锁定状态未知）" },
             SessionConnectionState.Connected => "已连接",
             SessionConnectionState.Disconnected => "已断开",
             SessionConnectionState.Init or SessionConnectionState.ConnectQuery => "正在准备",
             SessionConnectionState.Idle => "空闲",
-            SessionConnectionState.Unknown => "待确认",
-            _ => session.ConnectionState.ToString(),
+            SessionConnectionState.Shadow => "远程控制中",
+            SessionConnectionState.Listen => "正在侦听",
+            SessionConnectionState.Reset => "正在重置",
+            SessionConnectionState.Down => "不可用",
+            _ => "状态待确认",
         };
         return $"会话 {session.Id.Value} · {state}";
     }
@@ -1014,13 +1051,16 @@ internal sealed partial class ParchmentPreviewForm : Form
 
     private enum CheckResult { Pending, Ok, Warn, Error }
 
-    /// <summary>标题与首页使用同一连接观测值。已有子会话并不代表本窗口已连接到它。</summary>
-    internal void UpdateHeaderStatus(RdpPreviewConnectionState state, bool verified, SessionSnapshot? child)
+    /// <summary>
+    /// 用本窗口的 RDP 控件状态更新标题和首页连接行。只有这条连接核验过的子会话编号才显示为已连接目标。
+    /// 控件状态读取失败时显示未知，当前子会话的生命周期由首页另一行独立展示。
+    /// </summary>
+    internal void UpdateHeaderStatus(RdpPreviewConnectionState? state, SessionId? verifiedTarget)
     {
         string status = state switch
         {
-            RdpPreviewConnectionState.Connected when verified
-                => child is null ? "已连接" : $"已连接 · 会话 {child.Id.Value}",
+            RdpPreviewConnectionState.Connected when verifiedTarget is { } target
+                => $"已连接 · 会话 {target.Value}",
             RdpPreviewConnectionState.Connected when _previewPanel.IsPresentingChildSignIn && _childNeedsUnlock
                 => "等待分身解锁",
             RdpPreviewConnectionState.Connected when _previewPanel.IsPresentingChildSignIn
@@ -1029,10 +1069,16 @@ internal sealed partial class ParchmentPreviewForm : Form
                 => "正在核验",
             RdpPreviewConnectionState.Connecting
                 => "正在连接",
-            _ => "未连接",
+            RdpPreviewConnectionState.Disconnected => "本窗口未连接",
+            _ => "RDP 状态未确认",
         };
         UpdateCheckItem(_connectionIcon, _connectionText,
-            state == RdpPreviewConnectionState.Connected ? verified ? CheckResult.Ok : CheckResult.Warn : CheckResult.Pending, status);
+            state switch
+            {
+                null => CheckResult.Error,
+                RdpPreviewConnectionState.Connected => verifiedTarget.HasValue ? CheckResult.Ok : CheckResult.Warn,
+                _ => CheckResult.Pending,
+            }, status);
         Text = $"{Program.DisplayName} — {status}";
     }
 

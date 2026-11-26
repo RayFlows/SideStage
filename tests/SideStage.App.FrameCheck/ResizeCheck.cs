@@ -45,7 +45,18 @@ internal static class ResizeCheck
             Print("设置位置和大小", geometry);
             Print("主窗口 WM_PAINT", framePaint);
             Print("子控件 WM_PAINT（含嵌套消息）", childPaint);
-            return CheckMovingEdge(window) ? 0 : 1;
+            bool aligned = CheckMovingEdge(window);
+            // 系统菜单与首页按钮共用侧栏开合逻辑，这里只计入动作和随后的待绘消息。
+            for (int pass = 0; pass < 2; pass++)
+            {
+                long start = Stopwatch.GetTimestamp();
+                SendMessage(window.Handle, 0x0112, 0x1200, 0);
+                Application.DoEvents();
+                Console.WriteLine($"第 {pass + 1} 次展开侧栏 {Stopwatch.GetElapsedTime(start).TotalMilliseconds:F1} ms");
+                SendMessage(window.Handle, 0x0112, 0x1200, 0);
+                Application.DoEvents();
+            }
+            return aligned ? 0 : 1;
         }
         finally { foreach (PaintProbe probe in probes) probe.ReleaseHandle(); }
     }

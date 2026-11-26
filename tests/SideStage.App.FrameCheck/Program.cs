@@ -3,7 +3,7 @@
  * 测量方式：对自有窗体切换焦点、改变背板颜色，通过屏幕像素检查实际显示效果。
  * 使用方式：dotnet run --project tests/SideStage.App.FrameCheck；可附带一个路径输出验收截图，
  *   --horizontal 对比左右拖边和设置抽屉，--surface 对比上下拖边，--vertical 检查黑块和鼠标命中，
- *   --resize 测量布局耗时并检查右缘与纸面的相对位置，--caption-buttons 检查窗口状态切换后的标题键底色。
+ *   --resize 测量首次显示、拖边及展开侧栏的耗时并检查右缘对齐，--caption-buttons 检查窗口状态切换后的标题键底色。
  */
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -51,13 +51,22 @@ internal static class Program
         bool homeLayout = dpiCycle || args.FirstOrDefault() == "--home-layout";
         bool drawerLayout = args.FirstOrDefault() == "--drawer-layout";
         var firstUse = homeLayout || drawerLayout || captionButtons || args is ["--first-use", _] or ["--settings"] or ["--settings", _] ? new FirstUseSessions() : null;
+        long buildStart = Stopwatch.GetTimestamp();
         using ParchmentPreviewForm window = new(vault, logDirectory, folder => { openedFolder = folder; folderOpenCount++; },
             pollSessions: !homeLayout && !drawerLayout && !captionButtons && args is not ["--connected-resize"], sessionInspector: firstUse,
             enableChildSessions: firstUse is null ? null : firstUse.EnableAsync) { StartPosition = FormStartPosition.Manual, TopMost = true,
             Bounds = initial };
+        TimeSpan buildTime = Stopwatch.GetElapsedTime(buildStart);
         back.Show();
         other.Show(back);
+        long showStart = Stopwatch.GetTimestamp();
         window.Show(back);
+        if (args is ["--resize"])
+        {
+            Application.DoEvents();
+            Console.WriteLine($"构造窗口 {buildTime.TotalMilliseconds:F0} ms，" +
+                $"首次显示及处理绘制 {Stopwatch.GetElapsedTime(showStart).TotalMilliseconds:F0} ms");
+        }
         SetForegroundWindow(window.Handle);
         Settle();
         if (captionButtons) return SettingsInteractionCheck.CheckCaptionButtons(window);
@@ -78,7 +87,7 @@ internal static class Program
         }
         if (args is ["--first-use", var screenshot])
         {
-            SettingsInteractionCheck.CheckFirstUse(window, screenshot);
+            SettingsInteractionCheck.CheckFirstUse(window, firstUse!, screenshot);
             return 0;
         }
         if (liveAudio) return AudioReconnectCheck.Run(window);
@@ -99,7 +108,7 @@ internal static class Program
                     Math.Min(work.Height, window.LogicalToDeviceUnits(640)));
                 window.Location = new Point(work.Left + (work.Width - window.Width) / 2, work.Top + (work.Height - window.Height) / 2);
                 Settle();
-                int result = SettingsInteractionCheck.Run(window, args.ElementAtOrDefault(1));
+                int result = SettingsInteractionCheck.Run(window, firstUse!, args.ElementAtOrDefault(1));
                 if (folderOpenCount != 2 || openedFolder != logDirectory ||
                     !File.ReadAllText(Directory.GetFiles(logDirectory, "*.log").Single()).Contains("测试日志"))
                     throw new InvalidOperationException("气泡链接与本次日志写入目录不符，或日志未写入。");
@@ -146,12 +155,15 @@ internal static class Program
     {
         private bool _enabled;
 
+        /// <summary>允许验收用例改变下一轮系统查询的结果，包括已有分身、没有分身和查询失败。</summary>
+        internal Func<SessionSnapshot?> ReadChild { get; set; } = () => null;
+
         /// <summary>返回固定的已登录主桌面，保证截图和断言不受本机活动会话影响。</summary>
         public SessionSnapshot GetCurrentSession() =>
             new(new SessionId(1), SessionConnectionState.Active, false, DateTimeOffset.UtcNow) { IsLocked = false };
 
-        /// <summary>首次配置尚未建立分身。</summary>
-        public SessionSnapshot? TryGetChildSession() => null;
+        /// <summary>向正式轮询提供当前用例指定的分身观测值。</summary>
+        public SessionSnapshot? TryGetChildSession() => ReadChild();
 
         /// <summary>提供用于首页回读的当前开关。</summary>
         public bool IsChildSessionsEnabled() => _enabled;

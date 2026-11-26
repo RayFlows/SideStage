@@ -3,7 +3,6 @@
  * 安全约束：先确认本程序就是已登记的安装副本，再等待更新器复核成功；释放未提交的管道即取消。
  */
 using System.Diagnostics;
-using System.Security.Principal;
 using Microsoft.Win32;
 
 namespace SideStage.App;
@@ -19,8 +18,7 @@ internal sealed class UpdateHandoff : IDisposable
     internal static async Task<UpdateHandoff> PrepareAsync(VerifiedUpdate package, CancellationToken cancel)
     {
         // 当前用户安装不需要提权，也不应由高权限进程执行用户可写缓存中的安装器。
-        using var identity = WindowsIdentity.GetCurrent();
-        if (new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator))
+        if (StartupElevation.IsAdministrator())
             throw new InvalidOperationException("请用普通权限打开 SideStage 后更新，无需以管理员身份运行。");
         const string uninstall = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\{28C18EA6-CBC7-4C56-AFC2-A5307EAD9573}_is1";
         using var entry = Registry.CurrentUser.OpenSubKey(uninstall);
