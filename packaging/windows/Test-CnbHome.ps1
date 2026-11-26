@@ -41,11 +41,15 @@ try {
     git -C $origin add released.txt
     git -C $origin commit -qm 'old'
     git -C $origin tag v1.0.0-beta.2
+    git -C $origin tag v0.9.0
+    git -C $origin tag v0.9.1
     [IO.File]::WriteAllText((Join-Path $origin 'released.txt'), 'new')
     [IO.File]::WriteAllText((Join-Path $origin 'README.md'), "# SideStage`n`n原发行说明")
     git -C $origin add released.txt README.md
     git -C $origin commit -qm 'new'
     git -C $origin tag -a v1.0.0-beta.10 -m 'annotated'
+    git -C $origin tag v1.0.0
+    git -C $origin tag v1.1.0-beta.1
     Set-Location $runner
     # POSIX 路径用普通 [uri] 转换可能变成相对 URI；显式指定 file 协议，两个平台都不能访问外网。
     $from = [UriBuilder]::new('file','',-1,$origin.Replace('\','/')).Uri.AbsoluteUri
@@ -72,6 +76,26 @@ try {
     if (((git -C $mirror show 'main:README.md') -join "`n") -notmatch '原发行说明') { throw '未保留发行版原有的 README。' }
     Invoke-TestSync 'v1.0.0-beta.2'
     if ((Get-TestMain) -ne $latest -or (git write-tree) -ne $index) { throw '旧版本回退了首页或改变了工作索引。' }
+    # 在新测试版之后补发较低的正式版，两条下载线分别前进，首页源码始终对应主按钮。
+    Invoke-TestSync 'v0.9.0'
+    Invoke-TestSync 'v0.9.1'
+    $readme = (git -C $mirror show 'main:README.md') -join "`n"
+    if ($readme -notmatch '下载正式版（v0\.9\.1）.*试用测试版（v1\.0\.0-beta\.10）' -or
+        (git -C $mirror show 'main:released.txt') -cne 'first') { throw '补发正式版后主入口、测试入口或源码不正确。' }
+    $stableTip = Get-TestMain
+    Invoke-TestSync 'v1.0.0-beta.10'
+    Invoke-TestSync 'v0.9.0'
+    if ((Get-TestMain) -ne $stableTip) { throw '重新同步测试版或旧正式版改变了首页。' }
+    Invoke-TestSync 'v1.0.0'
+    $latest = Get-TestMain
+    $readme = (git -C $mirror show 'main:README.md') -join "`n"
+    if ($readme -notmatch '下载正式版（v1\.0\.0）' -or $readme.Contains('试用测试版')) { throw '正式发布后仍推荐旧的测试包。' }
+    Invoke-TestSync 'v1.0.0-beta.10'
+    if ((Get-TestMain) -ne $latest) { throw '重复同步旧测试版不能重新展示它。' }
+    Invoke-TestSync 'v1.1.0-beta.1'
+    $latest = Get-TestMain
+    $readme = (git -C $mirror show 'main:README.md') -join "`n"
+    if ($readme -notmatch '下载正式版（v1\.0\.0）.*试用测试版（v1\.1\.0-beta\.1）') { throw '发布新一轮 Beta 后正式版仍应是首选下载。' }
     git -C $mirror -c user.name=Test -c user.email=test@example.invalid commit-tree 'main^{tree}' -p main -m 'manual' |
         ForEach-Object { git -C $mirror update-ref refs/heads/main $_ $latest }
     $manual = Get-TestMain

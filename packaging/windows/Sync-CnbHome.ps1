@@ -20,16 +20,26 @@ $cnb = "https://cnb.cool/$CnbRepository"
 $github = "https://github.com/$GitHubRepository"
 $marker = 'SideStage-Release: '
 
-function New-HomeTree([string] $Commit) {
+function New-HomeTree([string] $Commit, [string] $MainTag, [string] $StableTag, [string] $PreviewTag) {
     <# 从发布树只替换 README.md；如标签已经带有说明，则保留原文放在下载入口下方。使用临时索引隔离宿主。 #>
+    $buttons = @(
+        if ($StableTag) {
+            $number = $StableTag -creplace '^v', ''
+            "**[下载正式版（$StableTag）]($cnb/-/releases/download/$StableTag/SideStage-$number-Setup-x64.exe)**"
+        }
+        if ($PreviewTag) {
+            $number = $PreviewTag -creplace '^v', ''
+            "[试用测试版（$PreviewTag）]($cnb/-/releases/download/$PreviewTag/SideStage-$number-Setup-x64.exe)"
+        }
+    ) -join ' · '
     $readme = @"
 # SideStage
 
-**[国内下载：Windows x64 安装包（$Tag）]($cnb/-/releases/download/$Tag/SideStage-$version-Setup-x64.exe)**
+$buttons
 
-[本版说明与 SHA-256 校验文件]($cnb/-/releases/tag/$Tag) · [全部发行版]($cnb/-/releases) · [GitHub 开发主仓]($github)
+[本版说明与 SHA-256 校验文件]($cnb/-/releases/tag/$MainTag) · [全部发行版]($cnb/-/releases) · [GitHub 开发主仓]($github)
 
-SideStage 把本机的 Windows RDP 子会话放在独立窗口里，让主桌面继续使用。此页展示的是 **$Tag** 的源码。
+SideStage 把本机的 Windows RDP 子会话放在独立窗口里，让主桌面继续使用。此页展示的是 **$MainTag** 的源码。
 "@
     if (git ls-tree --name-only $Commit -- README.md) {
         $original = (git show "${Commit}:README.md") -join "`n"
@@ -55,33 +65,61 @@ SideStage 把本机的 Windows RDP 子会话放在独立窗口里，让主桌面
 # 使用独立来源的标签，不以当前 HEAD、工作目录或本地同名标签为准。
 git fetch --no-tags "$github.git" "refs/tags/$Tag"
 $source = git rev-parse --verify 'FETCH_HEAD^{commit}'
-$tree = New-HomeTree $source
 
 # 不同标签可以同时发布。每次推送都只允许快进，遇到并发写入就重读最新首页再按版本比较。
 for ($try = 1; $try -le 3; $try++) {
     $tip = git ls-remote --heads "$cnb.git" refs/heads/main
     $parents = @('-p', $source)
+    $stable = $null
+    $preview = $null
+    $primarySource = $source
     if ($tip) {
         git fetch --no-tags "$cnb.git" refs/heads/main
         $previous = git rev-parse --verify 'FETCH_HEAD^{commit}'
         $subject = git show --no-patch --format=%s $previous
         if (!$subject.StartsWith($marker, [StringComparison]::Ordinal)) { throw 'CNB main 不是发布镜像维护的分支，未覆盖。' }
         $oldTag = $subject.Substring($marker.Length)
-        $order = ([semver]$version).CompareTo([semver]($oldTag -creplace '^v', ''))
-        if ($order -lt 0) { Write-Output "保留较新的首页 $oldTag；不回退至 $Tag。"; return }
-        if ($order -eq 0) {
-            $oldSource = (git show --no-patch --format=%b $previous) -join "`n"
-            if ($oldSource.Trim() -cne "Release-Commit: $source") { throw '同一版本对应了不同源码，拒绝改写首页。' }
-            if ((git rev-parse "${previous}^{tree}") -ceq $tree) { Write-Output "$Tag 首页已就绪。"; return }
+        # 旧版镜像只记录主标签和源码，首次同步时也能保留原来的正式版按钮。
+        $primarySource = git show -s '--format=%(trailers:key=Release-Commit,valueonly)' $previous | Select-Object -First 1
+        if ($primarySource -cnotmatch '^[0-9a-f]{40,64}$') { throw '镜像首页缺少有效的发行提交。' }
+        if ($oldTag.Contains('-')) { $preview = $oldTag } else { $stable = $oldTag }
+        $previewSource = $primarySource
+        if ($stable) {
+            $preview = git show -s '--format=%(trailers:key=Preview-Tag,valueonly)' $previous | Select-Object -First 1
+            $previewSource = git show -s '--format=%(trailers:key=Preview-Commit,valueonly)' $previous | Select-Object -First 1
         }
+        $isPreview = $version.Contains('-')
+        $sameChannel = if ($isPreview) { $preview } else { $stable }
+        if ($sameChannel) {
+            $order = ([semver]$version).CompareTo([semver]($sameChannel -creplace '^v', ''))
+            if ($order -lt 0) { return }
+            $recordedSource = if ($isPreview) { $previewSource } else { $primarySource }
+            if ($order -eq 0 -and $recordedSource -cne $source) { throw '同一版本对应了不同源码，拒绝改写首页。' }
+        }
+        if ($isPreview -and $stable -and [semver]$version -le [semver]($stable -creplace '^v', '')) { return }
         $parents = @('-p', $previous, '-p', $source)
     }
-    $next = git -c user.name=SideStage -c user.email=mirror@users.noreply.github.com commit-tree $tree @parents -m "$marker$Tag" -m "Release-Commit: $source"
+    if ($version.Contains('-')) {
+        $preview = $Tag
+        $previewSource = $source
+        if (!$stable) { $primarySource = $source }
+    } else {
+        $stable = $Tag
+        $primarySource = $source
+        if ($preview -and [semver]($preview -creplace '^v', '') -le [semver]$version) { $preview = $null }
+    }
+    $primaryTag = if ($stable) { $stable } else { $preview }
+    $tree = New-HomeTree $primarySource $primaryTag $stable $preview
+    $body = "Release-Commit: $primarySource"
+    if ($stable -and $preview) { $body += "`nPreview-Tag: $preview`nPreview-Commit: $previewSource" }
+    if ($tip -and (git rev-parse "${previous}^{tree}") -ceq $tree -and
+        ((git show -s --format=%b $previous) -join "`n").Trim() -ceq $body) { return }
+    $next = git -c user.name=SideStage -c user.email=mirror@users.noreply.github.com commit-tree $tree @parents -m "$marker$primaryTag" -m $body
     $oldHeader = $env:SIDESTAGE_CNB_GIT_HEADER
     $env:SIDESTAGE_CNB_GIT_HEADER = 'Authorization: Basic ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("cnb:$env:CNB_TOKEN"))
     try {
         git --config-env=http.https://cnb.cool/.extraHeader=SIDESTAGE_CNB_GIT_HEADER -c http.followRedirects=false push "$cnb.git" "${next}:refs/heads/main"
-        Write-Output "CNB main 已展示 $Tag 的源码与国内下载入口。"
+        Write-Output "CNB main 已展示 $primaryTag 的源码，并更新国内下载入口。"
         return
     } catch {
         $now = git ls-remote --heads "$cnb.git" refs/heads/main
