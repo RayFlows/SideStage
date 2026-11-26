@@ -40,7 +40,7 @@ foreach ($existing in @($userKey, "HKLM:\$key", $shortcut, $desktop, $defaultDir
 }
 
 $exe = Join-Path $dir 'SideStage.exe'
-$idleTitle = "SideStage $([char]0x2014) 未连接"
+$idleTitle = "SideStage $([char]0x2014) 本窗口未连接"
 $null = New-Item -ItemType Directory -Path $run
 
 <#
@@ -172,7 +172,7 @@ try {
     $firstUninstaller = Get-OwnedUninstaller
     Write-Output '首次安装：当前用户卸载记录、开始菜单入口和默认图标选项通过。'
 
-    $app = Start-Process -FilePath $entryPoint -WorkingDirectory $dir -PassThru -WindowStyle Minimized
+    $app = Start-Process -FilePath $entryPoint -ArgumentList '--standard' -WorkingDirectory $dir -PassThru -WindowStyle Minimized
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
     do {
         Start-Sleep -Milliseconds 200

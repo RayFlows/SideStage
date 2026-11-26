@@ -29,11 +29,13 @@ internal static class UpdateEntryTrial
         VerifyRoute(startup: false, skipped: false);
         VerifyRoute(startup: true, skipped: false);
         VerifyRoute(startup: true, skipped: true);
+        VerifyPermissionSwitch();
         return 0;
     }
 
     /// <summary>只替换数据来源与持久化位置；关闭时清理本轮创建的唯一键值，不接触已安装版本。</summary>
-    private static void WithHome(bool startup, bool skipped, Action<ParchmentPreviewForm, ReleaseList> exercise)
+    private static void WithHome(bool startup, bool skipped, Action<ParchmentPreviewForm, ReleaseList> exercise,
+        bool canReturnToLauncher = false, bool openUpdate = false)
     {
         string id = Guid.NewGuid().ToString("N"), key = $@"Software\SideStage.UpdateEntryTrial.{id}";
         var vault = new WindowsChildSessionCredentialStore($"SideStage.UpdateEntryTrial.{id}");
@@ -51,7 +53,7 @@ internal static class UpdateEntryTrial
             using var home = new ParchmentPreviewForm(vault, Path.Combine(Path.GetTempPath(), "SideStage.UpdateEntryTrial", id),
                 pollSessions: false, sessionInspector: new Program.FirstUseSessions(),
                 enableChildSessions: () => Task.FromException(new InvalidOperationException("更新入口测试不启用或连接真实子会话。")),
-                updateFeed: feed, updatePreferenceKey: key);
+                updateFeed: feed, updatePreferenceKey: key, canReturnToLauncher: canReturnToLauncher, openUpdate: openUpdate);
             home.Shown += (_, _) => home.Text = startup ? "SideStage · 自动检查入口测试" : "SideStage · 手动检查入口测试";
             exercise(home, list);
         }
@@ -60,6 +62,41 @@ internal static class UpdateEntryTrial
             Registry.CurrentUser.DeleteSubKey(key, throwOnMissingSubKey: false);
             vault.Delete();
         }
+    }
+
+    /// <summary>
+    /// 用真实窗口分两次走完启动器交接。管理员窗口退出并交还更新意图，普通窗口即使关闭了自动检查也能打开下载页。
+    /// 验收使用独立偏好、模拟权限来源和离线版本数据。
+    /// </summary>
+    private static void VerifyPermissionSwitch()
+    {
+        foreach (bool firstWindow in new[] { true, false })
+        {
+            WithHome(startup: firstWindow, skipped: !firstWindow, (home, _) =>
+            {
+                Exception? failure = null;
+                home.Shown += async (_, _) =>
+                {
+                    try
+                    {
+                        await Task.Yield();
+                        home.Activate();
+                        await WaitForAsync(() => VisibleOffer(home) != null, "切换权限时没有出现更新窗口。");
+                        var buttons = UpdateWindowCheck.Enumerate(VisibleOffer(home)!).OfType<Button>().ToArray();
+                        if (firstWindow) buttons.Single(b => b.Text == "以普通权限更新").PerformClick();
+                        else if (!buttons.Any(b => b.Text == "下载更新"))
+                            throw new InvalidOperationException("普通窗口没有提供下载入口。");
+                        if (firstWindow && !home.ContinueUpdateInLauncher)
+                            throw new InvalidOperationException("管理员窗口没有将更新请求交还启动器。");
+                    }
+                    catch (Exception ex) { failure = ex; }
+                    finally { if (!home.IsDisposed) home.Close(); }
+                };
+                Application.Run(home);
+                if (failure != null) throw new InvalidOperationException("更新权限交接失败。", failure);
+            }, canReturnToLauncher: firstWindow, openUpdate: !firstWindow);
+        }
+        Console.WriteLine("通过：管理员窗口退出后，普通启动器进入下载页。");
     }
 
     /// <summary>与正式入口一样运行持续的 UI 消息循环，让异步版本检查始终回到拥有主窗句柄的线程。</summary>
@@ -111,7 +148,7 @@ internal static class UpdateEntryTrial
         {
             string windows = string.Join("，", Application.OpenForms.Cast<Form>().Select(f =>
                 $"{f.Text}（可见={f.Visible}，属于主窗口={f.Owner == home}）"));
-            throw new InvalidOperationException($"入口未弹窗：请求 {feed.Requests} 次，设置行「{row.Text}」，当前窗口：{windows}", ex);
+            throw new InvalidOperationException($"入口未弹窗：请求 {feed.Requests} 次，设置行「{row.Text}」，主窗焦点={home.ContainsFocus}，活动窗={Form.ActiveForm?.Text}，当前窗口：{windows}", ex);
         }
         var offer = VisibleOffer(home)!;
         if (feed.Requests != 1 || !UpdateWindowCheck.Enumerate(offer).OfType<Label>().Any(c => c.Text.Contains(Available)))

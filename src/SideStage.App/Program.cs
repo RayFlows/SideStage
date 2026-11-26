@@ -9,7 +9,9 @@
  *   - 主窗口按用户的会话恢复偏好处理已连接分身的远程断开通知。
  */
 
+using System.Security.Principal;
 using System.Windows.Forms;
+using SideStage.Windows.Platform.Windows;
 
 namespace SideStage.App;
 
@@ -38,13 +40,21 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args is [ChildSessionEnableCommand.Argument]) return ChildSessionEnableCommand.EnableOnce();
+        string sid;
+        using (var identity = WindowsIdentity.GetCurrent())
+            sid = identity.User?.Value ?? throw new InvalidOperationException("无法识别当前 Windows 用户。");
+        var route = StartupElevation.Choose(args, StartupElevation.IsAdministrator(), sid,
+            () => StartupElevation.IsEnabled(StartupElevation.SettingsKey), StartupElevation.Request);
+        if (route == StartupRoute.Exit) return 0;
+        if (route == StartupRoute.DifferentAccount) return StartupElevation.DifferentAccountExitCode;
         ApplicationConfiguration.Initialize();
 
         // 两种界面的默认布局不同，分别记住各自的主窗口大小。
-        bool classic = args.Length > 0 && args[0] == "--classic";
-        using Form window = classic ? new ClassicPreviewForm() : new ParchmentPreviewForm();
+        bool classic = args.Contains("--classic");
+        using Form window = classic ? new ClassicPreviewForm() : new ParchmentPreviewForm(new WindowsChildSessionCredentialStore(),
+            canReturnToLauncher: route == StartupRoute.AuthorizedHome, openUpdate: route == StartupRoute.Update);
         WindowSizeMemory.Attach(window, @"Software\SideStage", classic ? "ClassicWindowSize" : "WindowSize");
         Application.Run(window);
-        return 0;
+        return window is ParchmentPreviewForm { ContinueUpdateInLauncher: true } ? StartupElevation.UpdateExitCode : 0;
     }
 }

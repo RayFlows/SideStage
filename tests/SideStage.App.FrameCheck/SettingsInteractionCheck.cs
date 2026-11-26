@@ -14,12 +14,12 @@ namespace SideStage.App.FrameCheck;
 internal static class SettingsInteractionCheck
 {
     /// <summary>通过首页按钮和齿轮分别打开同一个抽屉，并在真实窗口上检查布局与日志文本。</summary>
-    internal static int Run(ParchmentPreviewForm window, string? screenshot)
+    internal static int Run(ParchmentPreviewForm window, Program.FirstUseSessions sessions, string? screenshot)
     {
         var paper = Descendants(window).OfType<PaperSurface>().Single();
         var gear = Descendants(window).OfType<SettingsGear>().Single();
         var log = Descendants(window).OfType<RichTextBox>().Single();
-        CheckFirstUse(window, screenshot is null ? null : Path.ChangeExtension(screenshot, "home.png"));
+        CheckFirstUse(window, sessions, screenshot is null ? null : Path.ChangeExtension(screenshot, "home.png"));
         Require(!gear.Visible, "首页使用设置按钮");
         foreach (Button action in Descendants(paper).OfType<Button>())
         {
@@ -227,7 +227,7 @@ internal static class SettingsInteractionCheck
     }
 
     /// <summary>验收首次使用首页。截图取自交互前的真实窗口，随后分别点击配置和启用并核对结果。</summary>
-    internal static void CheckFirstUse(ParchmentPreviewForm window, string? screenshot)
+    internal static void CheckFirstUse(ParchmentPreviewForm window, Program.FirstUseSessions sessions, string? screenshot)
     {
         var home = Descendants(window).OfType<PaperSurface>().Single();
         Button Action(string text) => Descendants(home).OfType<Button>().Single(b => b.Text == text);
@@ -255,15 +255,53 @@ internal static class SettingsInteractionCheck
             Descendants(home).OfType<Label>().Single(l => l.AccessibleName == "子会话功能状态").Text == "已启用",
             "系统确认启用后开放连接，可继续配置凭据");
         CheckEditionHint(window, connect, screenshot);
+        CheckRunPrivilege(window, home, connect, screenshot);
         var connection = Descendants(home).OfType<Label>().Single(l => l.AccessibleName == "RDP 连接状态");
-        var existing = new SessionSnapshot(new SessionId(9), SessionConnectionState.Active, true, DateTimeOffset.UtcNow);
-        window.UpdateHeaderStatus(RdpPreviewConnectionState.Disconnected, false, existing);
-        Require(connection.Text == "未连接", "已存在子会话不代表本窗口已连接");
-        window.UpdateHeaderStatus(RdpPreviewConnectionState.Connecting, false, existing);
+        var child = Descendants(home).OfType<Label>().Single(l => l.AccessibleName == "当前子会话状态");
+        var existing = new SessionSnapshot(new SessionId(9), SessionConnectionState.Active, true, DateTimeOffset.UtcNow) { IsLocked = false };
+        Require(child.Text == "无子会话", "启用子会话功能后，系统仍可没有子会话");
+
+        // 让真实刷新定时器采到下一份快照，同时确认窗口标题和 RDP 状态均来自未连接的客户端。
+        void CheckPoll(Func<SessionSnapshot?> readChild, string expected)
+        {
+            sessions.ReadChild = readChild;
+            long until = Environment.TickCount64 + 3000;
+            while (child.Text != expected && Environment.TickCount64 < until) Wait(35);
+            Require(child.Text == expected && connection.Text == "本窗口未连接" && window.Text.EndsWith("本窗口未连接"),
+                $"本窗口未连接时，子会话独立显示「{expected}」（实际为「{child.Text}」）");
+        }
+        CheckPoll(() => existing, "会话 9 · 活动中");
+        if (screenshot is not null) Capture(window, Path.ChangeExtension(screenshot, "active-child.png"));
+        CheckPoll(() => existing with { IsLocked = true }, "会话 9 · 已锁定");
+        CheckPoll(() => existing with { ConnectionState = SessionConnectionState.Disconnected }, "会话 9 · 已断开");
+        CheckPoll(() => existing with { IsLocked = null, StateQueryError = 5 }, "会话 9 · 状态待确认（5）");
+        CheckPoll(() => throw new UnauthorizedAccessException("模拟会话查询被拒绝"), "无法确认");
+        CheckPoll(() => null, "无子会话");
+
+        window.UpdateHeaderStatus(RdpPreviewConnectionState.Connecting, null);
         Require(connection.Text == "正在连接", "尚在握手的连接不显示已连接");
-        window.UpdateHeaderStatus(RdpPreviewConnectionState.Connected, true, existing);
+        window.UpdateHeaderStatus(RdpPreviewConnectionState.Connected, existing.Id);
         Require(connection.Text == "已连接 · 会话 9", "已核验连接显示实际会话编号");
-        window.UpdateHeaderStatus(RdpPreviewConnectionState.Disconnected, false, null);
+        window.UpdateHeaderStatus(RdpPreviewConnectionState.Disconnected, null);
+    }
+
+    /// <summary>先核对启动时采集的权限，再模拟另外两种显示结果，验证提示、警告日志和普通连接入口。</summary>
+    private static void CheckRunPrivilege(ParchmentPreviewForm window, Control home, Button connect, string? screenshot)
+    {
+        Label status = Descendants(home).OfType<Label>().Single(l => l.AccessibleName == "运行权限状态");
+        var log = Descendants(window).OfType<RichTextBox>().Single();
+        bool elevated = StartupElevation.IsAdministrator();
+        const string warning = "普通权限 · 会话恢复可能受限";
+        Require(status.Text == (elevated ? "管理员" : warning), "首页显示启动进程的实际权限");
+        window.DisplayPrivilegeCheck(false);
+        Require(status.Text == warning && status.AccessibleDescription?.Contains("以管理员身份运行") == true
+            && log.Text.Contains(warning) && connect.Enabled, "普通权限给出恢复警告，仍可连接");
+        if (screenshot is not null) Capture(window, Path.ChangeExtension(screenshot, "standard-user.png"));
+        window.DisplayPrivilegeCheck(null);
+        Require(status.Text == "权限未知" && connect.Enabled, "权限读取失败单独提示");
+        window.DisplayPrivilegeCheck(true);
+        Require(status.Text == "管理员" && connect.Enabled, "管理员权限显示已取得");
+        window.DisplayPrivilegeCheck(elevated);
     }
 
     /// <summary>按 SKU 验证版本分类，用真实指针打开家庭版气泡，退出后还原本机系统信息和鼠标位置。</summary>

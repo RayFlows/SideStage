@@ -6,6 +6,7 @@
  */
 
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 
 namespace SideStage.App;
 
@@ -40,20 +41,34 @@ internal sealed class PaperSurface : Panel
             base.OnPaintBackground(e);
             if (Width < 8 || Height < 8) return;
             int motifWidth = Math.Min(Width, OrnamentWidth);
-            if (_raster?.Width != Width || _motifWidth != motifWidth)
+            if (_raster?.Size != ClientSize || _motifWidth != motifWidth)
             {
+                Bitmap next = RenderOrnament(ClientSize, motifWidth);
                 _raster?.Dispose();
-                _raster = RenderHorizontalRails(Width, motifWidth);
+                _raster = next;
                 _motifWidth = motifWidth;
             }
+            // 透明标签会借用父表的背景。只复制该标签需要的像素，纸纹继续由底层在真实位置平铺。
+            Rectangle clip = Rectangle.Intersect(e.ClipRectangle, ClientRectangle);
+            if (clip.Width > 0 && clip.Height > 0)
+                e.Graphics.DrawImage(_raster, clip, clip, GraphicsUnit.Pixel);
+        }
+
+        /// <summary>将角花及两侧直线一次绘制到最终尺寸的透明位图。移动表格和重画行文字时可直接复用。</summary>
+        private Bitmap RenderOrnament(Size size, int motifWidth)
+        {
+            using Bitmap rails = RenderHorizontalRails(size.Width, motifWidth);
+            Bitmap result = new(size.Width, size.Height, PixelFormat.Format32bppPArgb);
+            using Graphics graphics = Graphics.FromImage(result);
             // 源图上下各 100 个单位包含全部角花，中段只有左右两条金线。
-            int cap = Math.Min(Height / 2, (int)Math.Ceiling(motifWidth * 100 / _frame.ViewBox.Width));
-            int middle = Height - cap * 2;
-            e.Graphics.DrawImage(_raster, new Rectangle(0, 0, Width, cap), 0, 0, Width, cap, GraphicsUnit.Pixel);
-            if (middle > 0) e.Graphics.DrawImage(_raster, new Rectangle(0, cap, Width, middle),
-                0, cap, Width, _raster.Height - 2 * cap, GraphicsUnit.Pixel);
-            e.Graphics.DrawImage(_raster, new Rectangle(0, Height - cap, Width, cap),
-                0, _raster.Height - cap, Width, cap, GraphicsUnit.Pixel);
+            int cap = Math.Min(size.Height / 2, (int)Math.Ceiling(motifWidth * 100 / _frame.ViewBox.Width));
+            int middle = size.Height - cap * 2;
+            graphics.DrawImage(rails, new Rectangle(0, 0, size.Width, cap), 0, 0, size.Width, cap, GraphicsUnit.Pixel);
+            if (middle > 0) graphics.DrawImage(rails, new Rectangle(0, cap, size.Width, middle),
+                0, cap, size.Width, rails.Height - 2 * cap, GraphicsUnit.Pixel);
+            graphics.DrawImage(rails, new Rectangle(0, size.Height - cap, size.Width, cap),
+                0, rails.Height - cap, size.Width, cap, GraphicsUnit.Pixel);
+            return result;
         }
 
         /// <summary>用原图四分之一及四分之三处的直线填充新增宽度，保留两端方角和中央菱纹的像素比例。</summary>

@@ -1,5 +1,8 @@
 <!-- 文件职责：隔离安装验收的极小宿主，复用生产交接代码；绝不进入产品安装包。 -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>SideStage</AssemblyName></PropertyGroup>
-  <ItemGroup><Compile Include="../../src/SideStage.App/UpdateHandoff.cs" Link="UpdateHandoff.cs" /></ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../src/SideStage.App/UpdateHandoff.cs" Link="UpdateHandoff.cs" />
+    <Compile Include="../../src/SideStage.App/StartupElevation.cs" Link="StartupElevation.cs" />
+  </ItemGroup>
 </Project>

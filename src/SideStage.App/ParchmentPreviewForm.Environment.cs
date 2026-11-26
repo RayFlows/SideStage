@@ -1,6 +1,6 @@
 /*
  * 文件名称：ParchmentPreviewForm.Environment.cs
- * 文件职责：展示本机 Windows 版本、远程桌面和凭据状态，响应用户的子会话启用请求。
+ * 文件职责：展示宿主权限、本机 Windows 版本、远程桌面和凭据状态，响应用户的子会话启用请求。
  * 采样方式：在窗口可见时检查服务和预览控件，在窗口激活或凭据变更时检查保存项。
  * 操作边界：环境检查只读，用户点击启用后才调用 Windows 子会话配置接口并复查开关。
  *   首页不试登录、不启动服务，诊断信息不含账户或密码。
@@ -18,6 +18,69 @@ internal sealed partial class ParchmentPreviewForm
     private long _nextRdpCheck;
     private bool _rdpPrepared;
     private bool _enablingChildSessions;
+    private Label? _privilegeIcon, _privilegeText;
+
+    /// <summary>
+    /// 将下次启动的 UAC 请求开关显示在高级设置中。写入失败时读回实际偏好，避免开关显示为已保存。
+    /// </summary>
+    private void AddStartupPermissionSetting(TableLayoutPanel options)
+    {
+        options.Controls.Add(SectionHeading("启动权限"));
+        var list = new SettingsList();
+        var request = new SettingsSwitch("启动时请求管理员权限", _bodyFont)
+        {
+            Checked = StartupElevation.IsEnabled(_updatePreferenceKey)
+        };
+        bool restoring = false;
+        request.CheckedChanged += (_, _) =>
+        {
+            if (restoring) return;
+            try { StartupElevation.SetEnabled(_updatePreferenceKey, request.Checked); }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+            {
+                restoring = true;
+                try { request.Checked = StartupElevation.IsEnabled(_updatePreferenceKey); }
+                finally { restoring = false; }
+                ShowError("无法保存启动权限设置", ex);
+            }
+        };
+        list.AddRow(request);
+        options.Controls.Add(list);
+        options.Controls.Add(SettingsCaption.Footnote(
+            "建议开启，以便远程桌面断开后自动接回主桌面。更改在下次启动时生效。取消授权后，本次以普通权限打开。", _labelFont));
+    }
+
+    /// <summary>
+    /// 主窗口初始化后读取一次本次进程的权限。将读取失败单独显示，供用户区分权限未知和普通权限。
+    /// </summary>
+    private void RefreshPrivilegeCheck()
+    {
+        bool? administrator;
+        try { administrator = StartupElevation.IsAdministrator(); }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or Win32Exception)
+        {
+            administrator = null;
+        }
+        DisplayPrivilegeCheck(administrator);
+    }
+
+    /// <summary>
+    /// 首页和活动日志给出同一条权限提示。状态文字可由屏幕阅读器读取，悬停可查看恢复建议。
+    /// </summary>
+    internal void DisplayPrivilegeCheck(bool? administrator)
+    {
+        if (_privilegeText is null) return;
+        var (level, status, detail) = administrator switch
+        {
+            true => (CheckResult.Ok, "管理员", "SideStage 正以管理员身份运行。会话恢复仍需本机控制台空闲。"),
+            false => (CheckResult.Warn, "普通权限 · 会话恢复可能受限",
+                "可正常连接分身。需要远程断开后自动接回主桌面时，建议在连接前右键 SideStage，选择“以管理员身份运行”。"),
+            null => (CheckResult.Warn, "权限未知", "无法读取本次运行的权限。会话恢复结果请查看活动日志。"),
+        };
+        SetEnvironmentCheck(_privilegeIcon, _privilegeText, level, status, detail);
+        _privilegeText.AccessibleDescription = detail;
+        if (level == CheckResult.Warn) AppendLog($"{status}。{detail}", LogLevel.Warning);
+    }
 
     /// <summary>
     /// 窗口首次显示后在后台查询 Windows 自报的本地化产品名。系统名称仅供识别，

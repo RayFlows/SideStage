@@ -85,8 +85,12 @@ internal sealed partial class ParchmentPreviewForm
                         Math.Max(title.PreferredWidth + title.Margin.Horizontal, commands.PreferredSize.Width));
                     int width = Math.Max(Scaled(wide ? 680 : 500), card.Padding.Horizontal + bodyWidth);
                     // 先解除上一次的约束，缩小 DPI 后的首轮布局也能收回列宽。
-                    card.MinimumSize = Size.Empty;
-                    card.MaximumSize = card.MinimumSize = new Size(width, 0);
+                    Size target = new(width, 0);
+                    if (card.MinimumSize != target || card.MaximumSize != target)
+                    {
+                        card.MinimumSize = Size.Empty;
+                        card.MaximumSize = card.MinimumSize = target;
+                    }
                 }
                 finally { card.ResumeLayout(true); }
                 Center();
