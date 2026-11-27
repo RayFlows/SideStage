@@ -19,6 +19,8 @@ SideStage uses an RDP loopback connection to display a local Windows child sessi
 
 SideStage is for scripts and apps that run directly on a physical PC and need to capture windows, simulate input, or take control of the mouse or window focus.
 
+![SideStage opens advanced settings from the environment checks screen, shows scaling options, and adjusts the child session resolution](./images/sidestage-tour.gif)
+
 ## What can I do with SideStage?
 
 1. **Keep using your PC while a script controls the mouse and keyboard.** Open the script and the app it controls in the same child session. The script can click, type, and switch windows while you work on the main desktop.
