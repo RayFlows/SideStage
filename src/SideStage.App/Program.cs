@@ -57,11 +57,10 @@ internal static class Program
 
         // 两种界面的默认布局不同，分别记住各自的主窗口大小。
         bool classic = args.Contains("--classic");
-        using Form window = classic ? new ClassicPreviewForm() : new ParchmentPreviewForm(new WindowsChildSessionCredentialStore(),
-            canReturnToLauncher: route == StartupRoute.AuthorizedHome, openUpdate: route == StartupRoute.Update);
+        using Form window = classic ? new ClassicPreviewForm() : new ParchmentPreviewForm(new WindowsChildSessionCredentialStore());
         WindowSizeMemory.Attach(window, @"Software\SideStage", classic ? "ClassicWindowSize" : "WindowSize");
         Application.Run(window);
-        return window is ParchmentPreviewForm { ContinueUpdateInLauncher: true } ? StartupElevation.UpdateExitCode : 0;
+        return 0;
     }
 
     /// <summary>仅在已有受保护规则且普通恢复未能完成时，通过 Windows 正常授权重试。静默卸载返回失败供上层处理。</summary>

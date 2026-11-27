@@ -1,6 +1,6 @@
 /*
- * 文件职责：以当前用户的普通令牌修改个人启动登记和备份。
- * 权限边界：主窗口可能已为会话恢复获得管理员权限；用户可写目录和快捷方式按普通用户权限操作。
+ * 文件职责：为个人启动登记、当前用户更新缓存及安装进程提供同一账户的普通令牌。
+ * 权限边界：主窗口保留已获授权，用户可改写的路径只交给该账户的普通权限处理。
  */
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -16,24 +16,31 @@ internal static class StartupUserAccess
     {
         using var identity = WindowsIdentity.GetCurrent();
         if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)) return operation();
+        using var token = CreatePersonalToken(identity);
+        return WindowsIdentity.RunImpersonated(token, operation);
+    }
 
+    /// <summary>从当前账户创建普通主令牌，既可用于个人文件读写，也可直接交给 Windows 启动当前用户安装器。</summary>
+    internal static SafeAccessTokenHandle CreatePersonalToken(WindowsIdentity identity)
+    {
         // UAC 的关联令牌可能只可识别身份，无法用于创建互斥锁或写入。SAFER 从自己的令牌派生可执行的普通权限上下文。
         const uint machineScope = 1, normalUser = 0x20000, openLevel = 1;
         if (!SaferCreateLevel(machineScope, normalUser, openLevel, out var level, IntPtr.Zero)) throw LastError();
         try
         {
             if (!SaferComputeTokenFromLevel(level, identity.AccessToken, out var token, 0, IntPtr.Zero)) throw LastError();
-            using (token)
+            try
             {
                 SetMediumIntegrity(token);
-                return WindowsIdentity.RunImpersonated(token, () =>
+                WindowsIdentity.RunImpersonated(token, () =>
                 {
                     using var effective = WindowsIdentity.GetCurrent();
                     if (effective.User != identity.User || new WindowsPrincipal(effective).IsInRole(WindowsBuiltInRole.Administrator))
-                        throw new UnauthorizedAccessException("无法以当前账户的普通权限修改启动项。");
-                    return operation();
+                        throw new UnauthorizedAccessException("无法核实当前账户的个人操作权限。");
                 });
+                return token;
             }
+            catch { token.Dispose(); throw; }
         }
         finally { SaferCloseLevel(level); }
     }

@@ -4,9 +4,11 @@
 .DESCRIPTION
     使用无 RDP 能力的最小测试宿主和生产更新器、交接代码、Inno 配方。所有文件和卸载记录隔离，
     不关闭其他应用、不更改真实 SideStage；仅在明确匹配本轮标识后卸载。
+.PARAMETER ElevatedHost
+    用 Windows 的管理员授权启动一次隔离宿主，验证从已授权窗口直接交接至当前用户安装器。
 #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][string] $Iscc)
+param([Parameter(Mandatory)][string] $Iscc, [switch] $ElevatedHost)
 $ErrorActionPreference = 'Stop'
 $root = (Get-Item -LiteralPath "$PSScriptRoot/../..").FullName
 $id = [guid]::NewGuid().ToString()
@@ -68,9 +70,22 @@ try {
     $next = "$run/SideStage-1.1.0-Setup-x64.exe"
     $hash = (Get-FileHash -LiteralPath $next).Hash.ToLowerInvariant()
     foreach ($action in 'cancel','install') {
-        $hostRun = Start-Process -FilePath "$dir/SideStage.exe" -ArgumentList "$action `"$next`" $hash" -Wait -PassThru -WindowStyle Hidden
+        $mode = @{}
+        $arguments = "$action `"$next`" $hash"
+        if ($ElevatedHost -and $action -eq 'install') {
+            $mode.Verb = 'RunAs'
+            $arguments += ' --expect-elevated'
+        }
+        $hostRun = Start-Process -FilePath "$dir/SideStage.exe" -ArgumentList $arguments @mode -Wait -PassThru -WindowStyle Hidden
         if ($hostRun.ExitCode -ne 0) { throw "交接失败：$action" }
         $expected = if ($action -eq 'cancel') { '1.0.0' } else { '1.1.0' }
+        # 通过 UAC 启动宿主时，父测试进程只能直接等待宿主，安装完成由新版的实际启动标记确认。
+        if ($action -eq 'install') {
+            $deadline = [DateTime]::UtcNow.AddSeconds(60)
+            while (!(Test-Path -LiteralPath "$dir/restarted.txt") -and [DateTime]::UtcNow -lt $deadline) {
+                Start-Sleep -Milliseconds 100
+            }
+        }
         if ((Get-Content -Raw -LiteralPath "$dir/fixture-only.txt") -ne $expected -or
             (Get-ItemProperty -LiteralPath $key).DisplayVersion -ne $expected -or
             ((Test-Path -LiteralPath "$dir/restarted.txt") -ne ($action -eq 'install'))) { throw "版本或重启状态错误：$action" }

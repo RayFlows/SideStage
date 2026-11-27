@@ -28,8 +28,6 @@ internal sealed partial class ParchmentPreviewForm
     private bool _checkingUpdates;
     private bool _pendingUpdatePrompt, _preparingUpdate, _exitingForUpdate;
     private ReleaseUpdateWindow? _updateWindow;
-    private readonly bool _canReturnToLauncher;
-    internal bool ContinueUpdateInLauncher { get; private set; }
 
     /// <summary>复用现有设置行。离线试装版仍可查看当前版本，但不提供不能完成的联网操作。</summary>
     private void AddUpdateSettings(TableLayoutPanel options)
@@ -204,7 +202,8 @@ internal sealed partial class ParchmentPreviewForm
     {
         _pendingUpdatePrompt = false;
         _updateWindow ??= new(_updates.Current, offer,
-            (source, progress, cancel) => new UpdateDownload().FetchAsync(offer, source, _updates.SigningKey, progress, cancel),
+            (source, progress, cancel) => StartupUserAccess.AsUser(() =>
+                new UpdateDownload().FetchAsync(offer, source, _updates.SigningKey, progress, cancel)),
             InstallUpdateAsync, () =>
             {
                 ResetUpdateOffer();
@@ -218,7 +217,7 @@ internal sealed partial class ParchmentPreviewForm
                 if (_checkUpdates != null) _checkUpdates.Text = "查看待安装更新";
                 if (_homeSettings != null) _homeSettings.Text = "设置 · 待安装";
                 SetUpdateStatus($"{offer.Version.Text} 已下载，等待安装。");
-            }, enterStandardMode: _canReturnToLauncher || StartupElevation.IsAdministrator() ? EnterStandardUpdateModeAsync : null);
+            });
         if (!_updateWindow.Visible)
         {
             _updateWindow.StartPosition = FormStartPosition.Manual;
@@ -227,29 +226,6 @@ internal sealed partial class ParchmentPreviewForm
             _updateWindow.Show(this);
         }
         _updateWindow.Activate();
-    }
-
-    /// <summary>
-    /// 让原始普通权限启动器接手更新。已连接时先确认并仅断开预览，关闭被取消则保持现有窗口。
-    /// 手动从高权限环境独立启动时，告知用户如何从开始菜单进入普通模式。
-    /// </summary>
-    private async Task EnterStandardUpdateModeAsync()
-    {
-        if (!_canReturnToLauncher)
-            throw new InvalidOperationException("请从开始菜单正常打开 SideStage，在授权提示中选“否”，再点「检查更新」。更新前请先断开正在使用的连接并退出管理员窗口。");
-        if (_preparingUpdate) return;
-        _preparingUpdate = true;
-        try
-        {
-            Enabled = false;
-            ContinueUpdateInLauncher = await CloseForUpdateAsync();
-        }
-        finally
-        {
-            _exitingForUpdate = false;
-            _preparingUpdate = false;
-            if (!IsDisposed) Enabled = true;
-        }
     }
 
     /// <summary>等待更新器就绪后再断开；若取消、断开超时或关闭被否决，管道不提交，安装便不会开始。</summary>
@@ -277,7 +253,7 @@ internal sealed partial class ParchmentPreviewForm
         }
     }
 
-    /// <summary>取得明确同意后断开预览并保留子会话。更新器和普通权限启动器只有在窗口实际退出后才能接手。</summary>
+    /// <summary>取得明确同意后断开预览并保留子会话，窗口实际退出后才提交安装。</summary>
     private async Task<bool> CloseForUpdateAsync()
     {
         if (UpdateConnectionActive() && MessageBox.Show(_updateWindow,

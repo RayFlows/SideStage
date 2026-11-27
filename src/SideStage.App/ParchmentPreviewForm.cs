@@ -106,7 +106,7 @@ internal sealed partial class ParchmentPreviewForm : Form
     internal ParchmentPreviewForm(WindowsChildSessionCredentialStore credentialStore, string? logDirectory = null,
         Action<string>? openFolder = null, bool pollSessions = true, ISessionInspector? sessionInspector = null,
         Func<Task>? enableChildSessions = null, ReleaseUpdateFeed? updateFeed = null, string updatePreferenceKey = UpdatePreferenceKey,
-        bool canReturnToLauncher = false, bool openUpdate = false, Action<WindowsChildSessionCredentials>? requestPreviewConnection = null,
+        Action<WindowsChildSessionCredentials>? requestPreviewConnection = null,
         StartupInventory? startupInventory = null)
     {
         _updates = updateFeed ?? ReleaseUpdateFeed.FromBuild();
@@ -114,7 +114,6 @@ internal sealed partial class ParchmentPreviewForm : Form
         _startupInventory = startupInventory ?? new StartupInventory(logDirectory == null
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SideStage", "StartupInventory")
             : Path.Combine(logDirectory, "StartupInventory"));
-        _canReturnToLauncher = canReturnToLauncher;
         _watchSessionChanges = pollSessions && sessionInspector is null;
         _sessionInspector = sessionInspector ?? new WindowsSessionInspector();
         _enableChildSessions = enableChildSessions ?? ChildSessionEnableCommand.EnableAsync;
@@ -144,8 +143,7 @@ internal sealed partial class ParchmentPreviewForm : Form
             ShowWindowsEdition();
             if (_checkCredentialText?.Text.Length == 0) RefreshCredentialCheck();
             RefreshSessionStatus();
-            if (openUpdate) _ = CheckUpdatesAsync();
-            else if (_startupUpdates?.Checked == true) _ = CheckUpdatesAsync(startup: true);
+            if (_startupUpdates?.Checked == true) _ = CheckUpdatesAsync(startup: true);
             if (_startupInventory.Preferences().OnLaunch) _ = ScanStartupItemsAsync();
         };
         if (pollSessions) ConfigureRefreshTimer();

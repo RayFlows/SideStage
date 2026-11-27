@@ -13,7 +13,6 @@ internal sealed class ReleaseUpdateWindow : Form
     private readonly ReleaseOffer _offer;
     private readonly Func<UpdateSource, IProgress<int>, CancellationToken, Task<VerifiedUpdate>> _download;
     private readonly Func<VerifiedUpdate, Task> _install;
-    private readonly Func<Task>? _enterStandardMode;
     private readonly Action? _readyToInstall;
     private readonly CancellationToken _lifetime;
     private readonly FlowLayoutPanel _sources = new() { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true,
@@ -35,11 +34,9 @@ internal sealed class ReleaseUpdateWindow : Form
     /// <summary>仅渲染已解析的纯文本。下载、交接及跳过行为由主窗口注入，可离线验收，不接触真实会话。</summary>
     internal ReleaseUpdateWindow(ReleaseVersion current, ReleaseOffer offer,
         Func<UpdateSource, IProgress<int>, CancellationToken, Task<VerifiedUpdate>> download,
-        Func<VerifiedUpdate, Task> install, Action skip, CancellationToken lifetime, Action? readyToInstall = null,
-        Func<Task>? enterStandardMode = null)
+        Func<VerifiedUpdate, Task> install, Action skip, CancellationToken lifetime, Action? readyToInstall = null)
     {
         (_offer, _download, _install, _lifetime, _readyToInstall) = (offer, download, install, lifetime, readyToInstall);
-        _enterStandardMode = enterStandardMode;
         Program.ApplyIdentity(this);
         Text = "SideStage 更新";
         AutoScaleDimensions = new SizeF(96, 96);
@@ -61,21 +58,12 @@ internal sealed class ReleaseUpdateWindow : Form
         grid.Controls.Add(Caption($"当前 {current.Text}   →   {offer.Version.Text}", _body), 0, 1);
         grid.Controls.Add(Caption("更新内容", _section, 12), 0, 2);
         grid.Controls.Add(new ReleaseNotesFrame(offer.Notes) { Margin = new Padding(2, 4, 2, 0) }, 0, 3);
-        grid.Controls.Add(Caption(enterStandardMode is null ? "下载来源" : "更新权限", _section, 12), 0, 4);
-        if (enterStandardMode is null)
-        {
-            foreach (var source in offer.Sources)
-                _sources.Controls.Add(new ReleaseSourceOption(source, _hint) { Checked = _sources.Controls.Count == 0 });
-            _sources.ClientSizeChanged += (_, _) => FitSourceOptions();
-            DrawerMetrics.Bind(_sources, FitSourceOptions);
-            grid.Controls.Add(_sources, 0, 5);
-        }
-        else
-        {
-            _sources.Dispose();
-            grid.Controls.Add(Caption("切换到普通权限后可选择下载来源并安装更新。", _body), 0, 5);
-            _primary.Text = "以普通权限更新";
-        }
+        grid.Controls.Add(Caption("下载来源", _section, 12), 0, 4);
+        foreach (var source in offer.Sources)
+            _sources.Controls.Add(new ReleaseSourceOption(source, _hint) { Checked = _sources.Controls.Count == 0 });
+        _sources.ClientSizeChanged += (_, _) => FitSourceOptions();
+        DrawerMetrics.Bind(_sources, FitSourceOptions);
+        grid.Controls.Add(_sources, 0, 5);
         grid.Controls.Add(_progress, 0, 6);
         _status.Visible = false;
         _status.TextChanged += (_, _) => _status.Visible = _status.Text.Length != 0;
@@ -130,13 +118,6 @@ internal sealed class ReleaseUpdateWindow : Form
         if (_transfer != null || _installing) return;
         try
         {
-            if (_enterStandardMode != null)
-            {
-                _installing = true;
-                _later.Enabled = _primary.Enabled = false;
-                await _enterStandardMode();
-                return;
-            }
             if (_verified != null)
             {
                 _installing = true;
@@ -176,7 +157,7 @@ internal sealed class ReleaseUpdateWindow : Form
         {
             if (_lifetime.IsCancellationRequested || IsDisposed) return;
             _status.Text = ex is OperationCanceledException ? "操作已取消或超时。" : $"未完成：{ex.Message}";
-            if (_verified == null && _enterStandardMode == null) { _status.Text += " 可换源重试。"; _primary.Text = "重新下载"; }
+            if (_verified == null) { _status.Text += " 可换源重试。"; _primary.Text = "重新下载"; }
         }
         finally
         {
