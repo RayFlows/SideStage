@@ -48,7 +48,8 @@ internal static class Program
             ShowInTaskbar = false, StartPosition = FormStartPosition.Manual, Bounds = backing, BackColor = Color.Black };
         using Form other = new() { Text = "焦点切换测试", ShowInTaskbar = false, TopMost = true,
             StartPosition = FormStartPosition.Manual, Bounds = new Rectangle(backing.Left, backing.Top, 160, 45) };
-        bool liveResize = args is ["--live-resize"] or ["--live-drawer-jump"];
+        bool liveAdaptive = args is ["--live-adaptive-size"];
+        bool liveResize = liveAdaptive || args is ["--live-resize"] or ["--live-drawer-jump"];
         bool liveAudio = args is ["--live-audio"];
         var vault = liveResize || liveAudio ? new WindowsChildSessionCredentialStore() :
             new WindowsChildSessionCredentialStore($"SideStage.FrameCheck.{Guid.NewGuid():N}");
@@ -108,7 +109,7 @@ internal static class Program
             back.BackColor = ConnectedResizePixels.Backdrop;
             back.Refresh();
             if (args is ["--drawer-jump"]) return DrawerExpansionCheck.Run(window);
-            return ConnectedResizeCheck.Run(window, liveResize, args is ["--live-drawer-jump"]);
+            return ConnectedResizeCheck.Run(window, liveResize, args is ["--live-drawer-jump"], liveAdaptive);
         }
         if (args is ["--settings"] or ["--settings", _])
         {

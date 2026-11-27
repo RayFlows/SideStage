@@ -6,9 +6,11 @@
     测试负载只报告模拟的启动项恢复结果，用隔离目录验证卸载失败和重试。
 .PARAMETER Iscc
     Inno Setup 6.x 编译器路径；运行 Build-Installer.ps1 后可复用已校验的中文语言文件。
+.PARAMETER VerifyInteractiveElevation
+    无参数打开正式安装入口。授权后由隔离向导报告实际权限，再退出，不安装程序。
 #>
 [CmdletBinding()]
-param([string] $Iscc = 'ISCC.exe')
+param([string] $Iscc = 'ISCC.exe', [switch] $VerifyInteractiveElevation)
 $ErrorActionPreference = 'Stop'
 $root = (Get-Item -LiteralPath "$PSScriptRoot/../..").FullName
 $compiler = (Get-Command $Iscc -CommandType Application).Source
@@ -44,6 +46,19 @@ $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'SideStage.iss')).Repl
 if (-not $source.Contains("AppId={{$id}") -or $source.Contains($realId) -or $source -match '\{user(desktop|programs)\}') {
     throw '测试向导尚未完全隔离，拒绝继续。'
 }
+# 无参数才记录向导实际拿到的令牌，随后停止在任何安装写入之前。授权调用保持生产实现。
+$requestFile = Join-Path $run 'wizard-elevation.txt'
+$beforeRead = "  if not RegQueryStringValue(HKCU, UninstallKey, 'InstallLocation'"
+if (!$source.Contains($beforeRead)) { throw '未找到隔离向导的权限采样位置。' }
+$source = $source.Replace($beforeRead, @"
+  if ParamCount = 0 then begin
+    if IsAdmin then SaveStringToFile('$($requestFile.Replace("'","''"))', 'administrator', False)
+    else SaveStringToFile('$($requestFile.Replace("'","''"))', 'standard', False);
+    Result := False;
+    exit;
+  end;
+$beforeRead
+"@).Replace('DisableWelcomePage=no', "ShowLanguageDialog=no`r`nDisableWelcomePage=no")
 $recipe = Join-Path $run 'fixture.iss'
 [IO.File]::WriteAllText($recipe, $source, [Text.UTF8Encoding]::new($true))
 $language = Join-Path $root 'artifacts/tooling/ChineseSimplified-6.5.4.isl'
@@ -74,6 +89,18 @@ function Test-Mode([string] $Name, [string] $Version, [string] $Mode, [string] $
 }
 
 try {
+    if ($VerifyInteractiveElevation) {
+        $entryPoint = Join-Path $run 'SideStage-ElevationCheck.exe'
+        & "$PSScriptRoot/New-SetupEntry.ps1" -Payload "$run/Fixture-0.1.0-beta.2-Setup-x64.exe" -Destination $entryPoint `
+            -Version '0.1.0-beta.2' -FileVersion '0.1.0.0'
+        $probe = Start-Process -FilePath $entryPoint -PassThru -WindowStyle Hidden
+        $probe.WaitForExit()
+        if ($probe.ExitCode -eq 1223) { throw 'Windows 授权已取消。' }
+        if (!(Test-Path -LiteralPath $requestFile) -or (Get-Content -Raw -LiteralPath $requestFile) -cne 'administrator' -or (Test-Path -LiteralPath $key)) {
+            throw "安装向导未取得管理员权限，入口退出码 $($probe.ExitCode)。"
+        }
+        Write-Output '无参数打开安装包后，隔离向导实际取得了管理员权限。'
+    }
     Test-Mode '首次安装' '0.1.0-beta.2' 'install' '0.1.0-beta.2' $true
     # 原样文件应清除；同名但已修改的文件、用户文件、空目录和指向目录外的联接必须保留。
     foreach ($name in 'cs','de','zh-Hans') {

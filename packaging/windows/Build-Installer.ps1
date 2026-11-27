@@ -91,9 +91,12 @@ Copy-Item -LiteralPath (Join-Path $workerPublish 'SideStage.Updater.exe') -Desti
 & (Join-Path $PSScriptRoot 'Test-PublishLayout.ps1') -Directory $publish
 
 & $compiler '/Q' "/DAppVersion=$Version" "/DFileVersion=$numericVersion" "/DPublishDir=$publish" `
-    "/DOutputDirPath=$release" "/DChineseMessages=$language" (Join-Path $PSScriptRoot 'SideStage.iss')
+    "/DOutputDirPath=$stage" "/DChineseMessages=$language" (Join-Path $PSScriptRoot 'SideStage.iss')
 if ($LASTEXITCODE -ne 0) { throw '生成安装包失败。' }
-$installer = Get-Item -LiteralPath (Join-Path $release "SideStage-$Version-Setup-x64.exe")
+$installerName = "SideStage-$Version-Setup-x64.exe"
+& "$PSScriptRoot/New-SetupEntry.ps1" -Payload (Join-Path $stage $installerName) -Destination (Join-Path $release $installerName) `
+    -Version $Version -FileVersion $numericVersion
+$installer = Get-Item -LiteralPath (Join-Path $release $installerName)
 $digest = (Get-FileHash -LiteralPath $installer.FullName).Hash.ToLowerInvariant()
 "$digest  $($installer.Name)" | Set-Content -Encoding ASCII -LiteralPath (Join-Path $release 'SHA256SUMS.txt')
 $sig = Join-Path $release 'SHA256SUMS.sig'

@@ -56,6 +56,18 @@ $null = New-Item -ItemType Directory -Path $run
 function New-IsolatedSetup([string] $Package, [string] $Name) {
     $sourceDir = Join-Path $run $Name
     $null = New-Item -ItemType Directory -Path $sourceDir
+    # 新包用受信的程序集资源保存原始 Inno 向导。旧包可由 innounp 直接解包。
+    try { $entryAssembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($Package)) }
+    catch [BadImageFormatException] { $entryAssembly = $null }
+    if ($entryAssembly) {
+        $inner = $entryAssembly.GetManifestResourceStream('SideStage.InnoSetup')
+        if (!$inner) { throw '安装入口中缺少 Inno 负载。' }
+        $Package = Join-Path $sourceDir 'wizard.exe'
+        try {
+            $output = [IO.File]::Open($Package, [IO.FileMode]::CreateNew)
+            try { $inner.CopyTo($output) } finally { $output.Dispose() }
+        } finally { $inner.Dispose() }
+    }
     & $Unpacker -x -q -b "-d$sourceDir" $Package '{app}\*' | Out-Null
     if ($LASTEXITCODE) { throw "无法解出 $Name 安装负载。" }
     $payload = Join-Path $sourceDir '{app}'

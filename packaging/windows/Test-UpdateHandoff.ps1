@@ -75,7 +75,10 @@ try {
     $null = New-ItemProperty -LiteralPath $preferenceKey -Name 'RequestAdministratorOnStartup' -PropertyType DWord -Value ([int]$ask)
     $first = Start-Process -FilePath "$run/SideStage-1.0.0-Setup-x64.exe" -ArgumentList "/VERYSILENT /NORESTART /SP- /DIR=`"$dir`"" -Wait -PassThru -WindowStyle Hidden
     if ($first.ExitCode -ne 0 -or (Get-ItemProperty -LiteralPath $key).InstallLocation.TrimEnd('\') -ne $dir) { throw '隔离安装未成功。' }
-    $next = "$run/SideStage-1.1.0-Setup-x64.exe"
+    $download = [IO.Directory]::CreateDirectory((Join-Path $run 'download')).FullName
+    $next = "$download/SideStage-1.1.0-Setup-x64.exe"
+    & "$PSScriptRoot/New-SetupEntry.ps1" -Payload "$run/SideStage-1.1.0-Setup-x64.exe" -Destination $next `
+        -Version '1.1.0' -FileVersion '1.1.0.0'
     $hash = (Get-FileHash -LiteralPath $next).Hash.ToLowerInvariant()
     foreach ($action in 'busy','cancel','install') {
         $mode = @{}
@@ -97,7 +100,7 @@ try {
         if ((Get-Content -Raw -LiteralPath "$dir/fixture-only.txt") -ne $expected -or
             (Get-ItemProperty -LiteralPath $key).DisplayVersion -ne $expected -or
             ((Test-Path -LiteralPath "$dir/restarted.txt") -ne ($action -eq 'install'))) { throw "版本或重启状态错误：$action" }
-        if ($action -eq 'install' -and !(Select-String -LiteralPath "$run/install.log" -SimpleMatch -Quiet 'SideStage fixture: visible install progress')) {
+        if ($action -eq 'install' -and !(Select-String -LiteralPath "$download/install.log" -SimpleMatch -Quiet 'SideStage fixture: visible install progress')) {
             throw '实际写入期间没有观察到带正确标题和配色的可见安装进度。'
         }
         if ($action -eq 'install') {

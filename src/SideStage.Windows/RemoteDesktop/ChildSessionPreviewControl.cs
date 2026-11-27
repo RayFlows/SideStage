@@ -827,6 +827,15 @@ public sealed class ChildSessionPreviewControl : AxHost
     {
         SetComProperty(activeX, "DesktopWidth", settings.Resolution.Width);
         SetComProperty(activeX, "DesktopHeight", settings.Resolution.Height);
+        // SmartSizing 默认只缩小。连接前允许超出原像素尺寸，窗口放大时由原生控件同步缩放画面与鼠标。
+        // EnableZoom 为只写属性，只在 SmartSizing 开启时生效。1:1 模式仍然使用远端像素。
+        object enableZoom = true;
+        try { ((IMsRdpExtendedSettings)activeX).SetProperty("EnableZoom", ref enableZoom); }
+        catch (COMException ex) when (ex.HResult is unchecked((int)0x80070057) or unchecked((int)0x80020006)
+            or unchecked((int)0x80020003) or unchecked((int)0x80004001))
+        {
+            // 较旧的系统控件可能没有此属性，继续使用其支持的原生自适应缩小。
+        }
         ConfigurePreviewScaling(activeX, settings.ScalingMode);
 
         // 写入后读回，避免将未被 ActiveX 接受的分辨率当成已应用设置。

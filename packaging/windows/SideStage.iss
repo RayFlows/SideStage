@@ -22,6 +22,7 @@ DisableWelcomePage=no
 DisableReadyPage=no
 DisableDirPage=auto
 DisableProgramGroupPage=yes
+; 安装范围与进程权限独立。入口已处理交互授权，此处始终沿用当前用户的卸载记录。
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -56,7 +57,8 @@ Name: "{userprograms}\SideStage"; Filename: "{app}\SideStage.exe"; WorkingDir: "
 Name: "{userdesktop}\SideStage"; Filename: "{app}\SideStage.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\SideStage.exe"; Description: "{cm:LaunchProgram,SideStage}"; Flags: nowait postinstall skipifsilent
+; 从用户桌面打开，让主程序按自己的启动权限偏好运行。
+Filename: "{win}\explorer.exe"; Parameters: """{app}\SideStage.exe"""; Description: "{cm:LaunchProgram,SideStage}"; Flags: nowait postinstall skipifsilent
 
 [CustomMessages]
 zhcn.RestoreFailed=尚有启动项未能恢复。请查看 %1，处理后重试。取消将停止卸载并保留恢复所需的文件。
@@ -152,7 +154,7 @@ begin
   Result := StrToVersion(Value, Core);
 end;
 
-{ 在任何写入前读取一次卸载记录。首次安装、同版本重装、向前升级分别处理；旧包不降级。 }
+{ 在任何写入前读取当前用户的卸载记录，分别处理首次安装、同版本重装和升级。 }
 function InitializeSetup: Boolean;
 var
   OldCore, NewCore: Int64;

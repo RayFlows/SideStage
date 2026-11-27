@@ -11,7 +11,7 @@ namespace SideStage.App.FrameCheck;
 internal static class ConnectedResizeCheck
 {
     /// <summary>切换到预览工作区并模拟打开侧栏，验证各方向的实时控件尺寸、提交结果及取消。</summary>
-    internal static int Run(ParchmentPreviewForm window, bool live = false, bool drawerJump = false)
+    internal static int Run(ParchmentPreviewForm window, bool live = false, bool drawerJump = false, bool adaptiveSize = false)
     {
         var panel = Flatten(window).OfType<ChildSessionPreviewPanel>().Single();
         Point cursor = Cursor.Position;
@@ -39,6 +39,7 @@ internal static class ConnectedResizeCheck
                 window.SwitchMainView(RdpPreviewConnectionState.Connected);
             }
             if (drawerJump) return DrawerExpansionCheck.Run(window);
+            if (adaptiveSize) return AdaptiveSizeCheck.Run(window, panel);
             window.Size += new Size(96, 96);
             bool passed = true;
             for (int edge = 1; edge <= 8; edge++)
