@@ -1,7 +1,7 @@
 /*
  * 文件名称：StartupElevation.cs
  * 文件职责：保存当前用户的启动权限偏好，并在普通启动器与经 UAC 授权的主窗口之间分派启动请求。
- * 交接约定：启动器只等待自己创建的进程。用户选择更新后，由原来的普通权限启动器继续显示更新界面。
+ * 交接约定：启动器只等待自己创建的进程，仅在取消授权或账户不匹配时继续显示主窗口。
  */
 using System.ComponentModel;
 using System.Diagnostics;
@@ -11,14 +11,13 @@ using Microsoft.Win32;
 
 namespace SideStage.App;
 
-internal enum StartupRoute { Home, AuthorizedHome, Update, Exit, DifferentAccount }
+internal enum StartupRoute { Home, Exit, DifferentAccount }
 
 internal static class StartupElevation
 {
     internal const string SettingsKey = @"Software\SideStage";
     private const string Preference = "RequestAdministratorOnStartup";
     private const string AuthorizedArgument = "--authorized-window";
-    internal const int UpdateExitCode = 21841;
     internal const int DifferentAccountExitCode = 21842;
 
     /// <summary>只检查当前进程有效的管理员角色，能区分管理员账户的普通令牌与已授权令牌。</summary>
@@ -48,23 +47,18 @@ internal static class StartupElevation
 
     /// <summary>
     /// 每次普通启动最多请求一次 UAC。返回的管理员进程必须仍属原用户，避免打开另一个账户的凭据或桌面。
-    /// 单次普通启动和维护入口跳过授权；授权窗口仅通过退出码请求原启动器进入普通权限更新界面。
+    /// 单次普通启动和维护入口跳过授权，已授权窗口直接处理更新。
     /// </summary>
     internal static StartupRoute Choose(string[] args, bool elevated, string sid, Func<bool> enabled, Func<bool, string, int> request)
     {
         if (args is [AuthorizedArgument, var user, ..])
         {
             if (user != sid || !elevated) return StartupRoute.DifferentAccount;
-            return StartupRoute.AuthorizedHome;
+            return StartupRoute.Home;
         }
         bool classic = args is ["--classic"];
         if (elevated || (args.Length != 0 && !classic) || !enabled()) return StartupRoute.Home;
-        return request(classic, sid) switch
-        {
-            DifferentAccountExitCode => StartupRoute.Home,
-            UpdateExitCode => StartupRoute.Update,
-            _ => StartupRoute.Exit,
-        };
+        return request(classic, sid) == DifferentAccountExitCode ? StartupRoute.Home : StartupRoute.Exit;
     }
 
     /// <summary>通过 Windows 授权窗口启动同目录的固定宿主。取消或启动失败时原进程继续提供普通权限界面。</summary>

@@ -11,12 +11,24 @@
   <a href="https://github.com/RayFlows/SideStage/releases"><img alt="Latest release, including prereleases" src="https://img.shields.io/github/v/release/RayFlows/SideStage?include_prereleases&amp;sort=semver&amp;label=release&amp;style=flat-square&amp;color=1E9BFA" /></a>
   <a href="https://github.com/RayFlows/SideStage/releases"><img alt="GitHub downloads" src="https://img.shields.io/github/downloads/RayFlows/SideStage/total?style=flat-square&amp;logo=github&amp;label=downloads&amp;color=1E9BFA" /></a>
 </p>
+<p align="center">⭐ If SideStage helps you, give it a star! To get update notifications, choose Watch → Custom → Releases.</p>
 
 SideStage uses an RDP loopback connection to display a local Windows child session in a regular window. Simulated input in that window leaves the main desktop's mouse and window focus alone. Scripts and apps that capture windows inside the child session can keep doing so when you turn off the physical monitor.
 
 ![Environment checks](./images/home.png)
 
 SideStage is for scripts and apps that run directly on a physical PC and need to capture windows, simulate input, or take control of the mouse or window focus.
+
+## What can I do with SideStage?
+
+1. **Keep using your PC while a script controls the mouse and keyboard.** Open the script and the app it controls in the same child session. The script can click, type, and switch windows while you work on the main desktop.
+2. **Connect without typing your password each time.** You can save your Windows account password in Windows Credential Manager on this PC. In our initial tests, the child session could then sign in automatically while the main desktop kept its usual sign-in method.
+3. **Use familiar desktop features, including “Run as administrator.”** On some PCs, signing in with the main desktop's identity prevents apps in the child session from requesting elevation. Creating a new child session with your Windows account password can restore the usual UAC prompt.
+4. **Recover script input after disconnecting from your PC remotely.** Sometimes the programs in the child session keep running, but clicks and keystrokes stop working. If the main session is still running, SideStage can try to reconnect it to the local console. This experimental feature requires administrator access and can make the main desktop visible on the PC's screen.
+5. **Keep startup apps from opening a second time.** Under “Start when signing in to the child session” (分身登录时启动), choose which startup entries to skip, individually or in bulk. The main desktop keeps its usual startup settings. Available in the `v0.2.0` series.
+6. **Disconnect or update while a task keeps running.** Choose “Disconnect” to leave the child session and its programs running. Reconnect later to check progress. When you're ready to end the programs, choose “Sign out of child session.”
+7. **Fit the session on your desktop while keeping the resolution your script needs.** For example, keep the session at `1920 × 1080` and scale its display to fit a smaller window with the same aspect ratio. You can also mute the child session independently of the main desktop.
+8. **Give AI computer-use tools their own mouse and browser.** Run tools such as Codex and the browser they control inside SideStage so you can keep using your own desktop.
 
 ## Download
 
@@ -28,7 +40,9 @@ Installers are available for Windows 10 and 11 x64. Download the file ending in 
 
 ## Usage
 
-SideStage currently supports Windows 10 and 11 x64 in our testing. The app opens on an environment checklist. Opening it reads your system settings. Settings change only when you take an action.
+SideStage currently supports Windows 10 and 11 x64 only.
+
+The app opens on an environment checklist. Opening it reads your system settings. Settings change only when you take an action.
 
 1. **Check that Windows child sessions are enabled.**
    If you see a cross on that row, click the button next to it to enable the feature.
@@ -41,9 +55,9 @@ Once all the checks pass, you should be able to connect.
 
 **⚠️ Notes**
 
-1. Windows shows a UAC prompt the first time you enable child sessions. SideStage enables the Windows setting for you.
+1. Windows may show a UAC prompt the first time you enable child sessions. SideStage enables the Windows setting for you.
 2. Microsoft's documentation lists the Pro, Education, and Pro for Workstations editions for hosting RDP connections. In our testing, Windows Home can also attempt a connection and should work in most cases. Try connecting to see whether it works on your PC.
-3. A child session has its own desktop and input, with the same account permissions. It runs directly on your PC. Keep untrusted software out of the session.
+3. SideStage separates desktop windows and input. Programs keep your account permissions and run directly on your PC, outside a virtual machine. **Never use the child session as a sandbox for untrusted software.**
 4. Changing the resolution requires reconnecting. Toggling Mute child session (静音分身) also reconnects, and programs in the session keep running.
 
 ## Q&A
@@ -63,13 +77,13 @@ Once all the checks pass, you should be able to connect.
 5. **Can scripts still capture windows with the monitor off?**\
    They should be able to as long as you stay signed in to the child session.
 
-6. **Why can't I sometimes run a program as administrator in the child session?**\
-   In our comparison, Windows returned the logon flags `0x8120` when we signed in with the account password and `0x48120` when we used the main desktop's identity. The extra `0x40000` (`LOGON_NO_ELEVATION`) means elevation was unavailable for that sign-in. We observed these values on the machine we tested. SideStage uses the password you enter for the current connection regardless of the Save locally setting. Saving the password lets you skip entering it again. Your account keeps the same administrator rights.
+6. **Why does right-clicking an app and choosing “Run as administrator” sometimes fail in the child session?**\
+   In our comparison, Windows returned the logon flags `0x8120` when we signed in with the account password and `0x48120` when we used the main desktop's identity. The extra `0x40000` (`LOGON_NO_ELEVATION`) means elevation was unavailable for that sign-in. We observed these values on the machine we tested. SideStage uses the password you enter for the current connection regardless of the Save locally setting. Saving the password lets you skip entering it again. Your account keeps the same administrator rights. If Windows asks for your password again after you've saved it, check for a typo. Re-entering your account password and saving it again usually resolves this.
 
 7. **Where can I find the logs?**\
    Open Advanced settings (高级设置), hover over the information icon beside Activity log (活动日志), and click the blue link in the tooltip.
 
-P.S. Most issues come from Windows itself, and some bugs are in RDP. Feel free to discuss solutions in Issues. BetterGI's desktop clone feature was a major source of inspiration for this project. We built this library because that feature is closely tied to Genshin Impact and BetterGI. You may find solutions in [BetterGI's desktop clone documentation](https://www.bettergi.com/feats/command/session.html) or [the related BetterGI issues](https://github.com/babalae/better-genshin-impact/issues?q=is%3Aissue%20label%3A%E6%A1%8C%E9%9D%A2%E5%88%86%E8%BA%AB).
+P.S. Most issues come from Windows itself, and some bugs are in RDP. Feel free to discuss solutions in Issues. BetterGI's desktop clone feature was a major inspiration for SideStage. It was designed around Genshin Impact and BetterGI, so we built a standalone library for people who just want the child desktop. Thanks to the BetterGI team for the scripts we love using! You may also find solutions in [BetterGI's desktop clone documentation](https://www.bettergi.com/feats/command/session.html) and [the related BetterGI issues](https://github.com/babalae/better-genshin-impact/issues?q=is%3Aissue%20label%3A%E6%A1%8C%E9%9D%A2%E5%88%86%E8%BA%AB).
 
 ## Run from source
 

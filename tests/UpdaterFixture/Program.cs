@@ -17,7 +17,14 @@ internal static class Program
     {
         string dir = AppContext.BaseDirectory;
         if (!File.Exists(Path.Combine(dir, "fixture-only.txt"))) return 2;
+        // 隔离宿主不登记任何启动项；卸载器的恢复请求可以直接确认完成。
+        if (args is ["--restore-startup-items", "--silent"]) return 0;
         if (args.Length == 0) { File.WriteAllText(Path.Combine(dir, "restarted.txt"), "ok"); return 0; }
+        if (args is [_, _, _, "--expect-elevated"])
+        {
+            if (!StartupElevation.IsAdministrator()) return 3;
+            args = args[..3];
+        }
         if (args is not [var action, var path, var hash]) return 2;
         using var ticket = await UpdateHandoff.PrepareAtPathAsync(new(path, hash), dir, CancellationToken.None);
         if (action == "install") ticket.Commit();

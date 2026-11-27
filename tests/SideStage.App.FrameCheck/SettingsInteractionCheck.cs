@@ -5,6 +5,7 @@
  */
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Win32;
 using SideStage.Core.Sessions;
 using SideStage.Windows.Platform.Windows;
 using SideStage.Windows.RemoteDesktop;
@@ -13,6 +14,98 @@ namespace SideStage.App.FrameCheck;
 
 internal static class SettingsInteractionCheck
 {
+    /// <summary>
+    /// 用单独的注册表键和凭据项检查管理员开关，再从同一真实窗口分别提交首次输入和已保存凭据。
+    /// 用记录侧栏可见性的回调代替 RDP 调用，以便在请求发出的当下验收界面，无需实际登录。
+    /// </summary>
+    internal static int CheckPrivilegeAndConnect()
+    {
+        string id = Guid.NewGuid().ToString("N");
+        string key = $@"Software\SideStage.FrameCheck\{id}";
+        var vault = new WindowsChildSessionCredentialStore($"SideStage.FrameCheck.{id}");
+        var sessions = new Program.FirstUseSessions();
+        sessions.EnableAsync().GetAwaiter().GetResult();
+        var drawerStatesAtRequest = new List<bool>();
+        DrawerCollapseTab? tab = null;
+        Point originalCursor = Cursor.Position;
+        try
+        {
+            ParchmentPreviewForm.WriteRecoveryPreference(key, true);
+            using var client = new System.Net.Http.HttpClient();
+            using Form owner = new() { TopMost = true, ShowInTaskbar = false, Size = new Size(1, 1) };
+            using var window = new ParchmentPreviewForm(vault, Path.Combine(Path.GetTempPath(), "SideStage.FrameCheck", id),
+                pollSessions: false, sessionInspector: sessions, updatePreferenceKey: key,
+                updateFeed: new ReleaseUpdateFeed(client, "1.0.0", null),
+                requestPreviewConnection: _ => drawerStatesAtRequest.Add(tab!.Visible))
+                { TopMost = true, StartPosition = FormStartPosition.CenterScreen, Size = new Size(1000, 760) };
+            owner.Show();
+            window.Show(owner);
+            window.Activate();
+            Program.SetForegroundWindow(window.Handle);
+            Wait(180);
+            var controls = Descendants(window).ToArray();
+            tab = controls.OfType<DrawerCollapseTab>().Single();
+            var advanced = controls.OfType<Button>().Single(b => b.Text == "高级设置");
+            var connect = controls.OfType<Button>().Single(b => b.Text == "连接");
+            var recovery = controls.OfType<SettingsSwitch>().Single(s => s.Text == "远程断开后接回主桌面");
+            var request = controls.OfType<SettingsSwitch>().Single(s => s.Text == "启动时请求管理员权限");
+            var warning = controls.OfType<PaperInfoButton>().Single(b => b.AccessibleName == "主桌面恢复权限提示");
+            const string hint = "未获取管理员权限，无法启用";
+            advanced.PerformClick();
+            Require(controls.OfType<Label>().Any(l => l.Visible && l.Text == "建议开启，否则某些功能无法使用。"), "启动权限说明完整显示");
+            foreach (bool? privilege in new bool?[] { false, null })
+            {
+                window.DisplayPrivilegeCheck(privilege);
+                Require(!recovery.Enabled && !recovery.Checked && warning.Visible && warning.Text == "\uE7BA" &&
+                    recovery.AccessibleDescription == hint && request.Enabled && connect.Enabled &&
+                    ParchmentPreviewForm.ReadRecoveryPreference(key), "无管理员权限时恢复开关关闭，原有偏好仍保存");
+            }
+            var viewport = controls.OfType<Panel>().Single(p => p.AutoScroll && p.Contains(warning));
+            viewport.ScrollControlIntoView(warning);
+            Wait(100);
+            Point anchor = warning.PointToScreen(new Point(warning.Width / 2, warning.Height / 2));
+            Cursor.Position = anchor;
+            nint hit = WindowFromPoint(anchor);
+            Program.GetWindowThreadProcessId(hit, out int occupant);
+            Require(hit == warning.Handle, $"三角标记可命中（实际 {Control.FromChildHandle(hit)?.GetType().Name}，窗口进程 {occupant}，验收进程 {Environment.ProcessId}，标记 {warning.Bounds}，视口 {viewport.RectangleToScreen(viewport.ClientRectangle)}）");
+            long deadline = Environment.TickCount64 + SystemInformation.MouseHoverTime + 1800;
+            while (warning.BubbleBounds.IsEmpty && Environment.TickCount64 < deadline) Wait(30);
+            Rectangle popup = warning.BubbleBounds;
+            var bubble = popup.IsEmpty ? null : FindPopupAt(new Point(popup.Left + popup.Width / 2, popup.Top + popup.Height / 2));
+            Require(bubble is PaperHintBubble && Descendants(bubble).OfType<Label>().Single().Text == hint,
+                $"悬停三角标记显示权限说明（目标 {anchor}，命中 {Control.FromChildHandle(WindowFromPoint(anchor))?.AccessibleName}，指针 {Cursor.Position}，弹层 {popup}）");
+            bubble!.Close();
+            window.DisplayPrivilegeCheck(true);
+            Require(recovery.Enabled && recovery.Checked && !warning.Visible, "取得管理员权限后恢复先前开启的偏好");
+            recovery.Checked = false;
+            window.DisplayPrivilegeCheck(false);
+            window.DisplayPrivilegeCheck(true);
+            Require(recovery.Enabled && !recovery.Checked && !ParchmentPreviewForm.ReadRecoveryPreference(key), "先前手动关闭的功能仍然关闭");
+
+            // 第一次从展开的侧栏点连接，必须等到凭据通过校验；第二次直接从同一个隔离保存项读取。
+            connect.PerformClick();
+            var editor = Descendants(window).OfType<InlineCredentialEditor>().Single();
+            var submit = Descendants(editor).OfType<Button>().Single(b => b.Text == "连接");
+            submit.PerformClick();
+            Require(tab.Visible && editor.Visible && drawerStatesAtRequest.Count == 0, "缺少密码时保留输入页等待用户填写");
+            Descendants(editor).OfType<TextBox>().Single(t => t.AccessibleName == "密码").Text = "FrameCheck-only";
+            submit.PerformClick();
+            Require(drawerStatesAtRequest.SequenceEqual([false]) && editor.IsDisposed && vault.HasSavedCredentials(),
+                "提交有效表单后先收起侧栏再请求 RDP");
+            advanced.PerformClick();
+            Require(tab.Visible, "已保存凭据时从展开的高级设置开始连接");
+            connect.PerformClick();
+            Require(drawerStatesAtRequest.SequenceEqual([false, false]) && !tab.Visible, "读取保存项后先收起侧栏再请求 RDP");
+            return 0;
+        }
+        finally
+        {
+            Cursor.Position = originalCursor;
+            vault.Delete();
+            Registry.CurrentUser.DeleteSubKey(key, throwOnMissingSubKey: false);
+        }
+    }
+
     /// <summary>通过首页按钮和齿轮分别打开同一个抽屉，并在真实窗口上检查布局与日志文本。</summary>
     internal static int Run(ParchmentPreviewForm window, Program.FirstUseSessions sessions, string? screenshot)
     {
@@ -74,6 +167,11 @@ internal static class SettingsInteractionCheck
         var disconnect = Descendants(drawer).OfType<Button>().Single(b => b.Text == "断开连接");
         var logoff = Descendants(drawer).OfType<Button>().Single(b => b.Text == "注销子会话…");
         Require(!disconnect.Visible && !logoff.Visible, "首页设置不显示会话操作");
+        window.UpdateSessionCommands(false, true);
+        var sessionHeading = Descendants(drawer).OfType<Label>().Single(label => label.Text == "当前会话");
+        var pictureHeading = Descendants(drawer).OfType<Label>().Single(label => label.Text == "画面与声音");
+        Require(!sessionHeading.Visible && !logoff.Visible, "窗口未连接但分身仍可注销时隐藏当前会话");
+        window.UpdateSessionCommands(false, false);
         Require(paper.Controls[0].Right <= drawer.Left, "侧栏打开时首页状态完整可见");
         string longMessage = string.Concat(Enumerable.Repeat("请核对当前会话状态。", 12));
         window.AppendLog(longMessage, ParchmentPreviewForm.LogLevel.Warning);
@@ -117,6 +215,8 @@ internal static class SettingsInteractionCheck
         Require(log.Visible && !gear.Visible && preview.Bounds == initialPreview, "齿轮唤起侧栏且预览尺寸不变");
         window.UpdateSessionCommands(true, false);
         Require(disconnect.Visible && disconnect.Enabled && logoff.Visible && !logoff.Enabled, "目标未核验时只可断开");
+        Require(sessionHeading.Visible && sessionHeading.PointToScreen(Point.Empty).Y < pictureHeading.PointToScreen(Point.Empty).Y,
+            "连接时当前会话排在画面与声音之前");
         window.UpdateSessionCommands(true, true);
         Require(disconnect.Enabled && logoff.Enabled, "已核验时提供断开和注销");
         if (screenshot != null) Capture(window, Path.ChangeExtension(screenshot, "session.png"));
@@ -148,6 +248,9 @@ internal static class SettingsInteractionCheck
         try
         {
             using Bitmap background = CaptureArea(window.Bounds);
+            // 从窗口内部的另一个控件移入，确保这是一次新的悬停，而不依赖前一个用例还原指针的位置。
+            Cursor.Position = window.PointToScreen(new Point(40, 40));
+            Wait(80);
             Cursor.Position = info.PointToScreen(new Point(info.Width / 2, info.Height / 2));
             Point anchor = Cursor.Position;
             // 等到系统真正送达悬停并显示气泡再向下移动，避免受屏幕刷新和 UI 消息队列延迟影响。
@@ -291,7 +394,7 @@ internal static class SettingsInteractionCheck
         Label status = Descendants(home).OfType<Label>().Single(l => l.AccessibleName == "运行权限状态");
         var log = Descendants(window).OfType<RichTextBox>().Single();
         bool elevated = StartupElevation.IsAdministrator();
-        const string warning = "普通权限 · 会话恢复可能受限";
+        const string warning = "普通权限 · 主桌面恢复已停用";
         Require(status.Text == (elevated ? "管理员" : warning), "首页显示启动进程的实际权限");
         window.DisplayPrivilegeCheck(false);
         Require(status.Text == warning && status.AccessibleDescription?.Contains("以管理员身份运行") == true

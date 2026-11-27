@@ -16,37 +16,81 @@ internal sealed partial class ParchmentPreviewForm
 {
     private const string UpdatePreferenceKey = StartupElevation.SettingsKey;
     private const string StartupPreferenceName = "CheckUpdatesOnStartup";
+    private const string PreviewPreferenceName = "ReceivePrereleaseUpdates";
     private readonly ReleaseUpdateFeed _updates;
     private readonly string _updatePreferenceKey;
     private readonly CancellationTokenSource _updateLifetime = new();
     private SettingsActionRow? _checkUpdates;
-    private SettingsSwitch? _startupUpdates;
+    private SettingsSwitch? _startupUpdates, _previewUpdates;
     private Label? _updateStatus;
     private Button? _homeSettings;
     private ReleaseOffer? _updateOffer;
     private bool _checkingUpdates;
     private bool _pendingUpdatePrompt, _preparingUpdate, _exitingForUpdate;
     private ReleaseUpdateWindow? _updateWindow;
-    private readonly bool _canReturnToLauncher;
-    internal bool ContinueUpdateInLauncher { get; private set; }
 
     /// <summary>复用现有设置行。离线试装版仍可查看当前版本，但不提供不能完成的联网操作。</summary>
     private void AddUpdateSettings(TableLayoutPanel options)
     {
-        options.Controls.Add(SectionHeading("应用更新"));
-        SettingsList list = new();
-        _checkUpdates = new SettingsActionRow("检查更新", _bodyFont, OpenOrCheckUpdate) { Enabled = _updates.IsConfigured };
-        list.AddRow(_checkUpdates);
+        SettingsList list = new(topGap: SectionGap);
         _startupUpdates = new SettingsSwitch("启动时检查更新", _bodyFont)
         {
             Enabled = _updates.IsConfigured, Checked = _updates.IsConfigured && ReadStartupPreference(),
         };
         _startupUpdates.CheckedChanged += SaveStartupPreference;
         list.AddRow(_startupUpdates);
+        _previewUpdates = new SettingsSwitch("接受测试版更新推送", _bodyFont)
+        {
+            Enabled = _updates.IsConfigured, Checked = _updates.IsConfigured && ReadPreviewPreference()
+        };
+        _previewUpdates.CheckedChanged += ChangePreviewPreference;
+        list.AddRow(_previewUpdates);
+        _checkUpdates = new SettingsActionRow("立即检查更新", _bodyFont, OpenOrCheckUpdate) { Enabled = _updates.IsConfigured };
+        list.AddRow(_checkUpdates);
         options.Controls.Add(list);
         _updateStatus = SettingsCaption.Footnote("", _labelFont);
         options.Controls.Add(_updateStatus);
         SetUpdateStatus(_updates.IsConfigured ? "" : "本地试装版未连接发布仓库。");
+    }
+
+    /// <summary>优先使用用户的选择。首次运行测试版时记住订阅，之后升级正式版仍沿用这一选择。</summary>
+    private bool ReadPreviewPreference()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(_updatePreferenceKey);
+            if (key.GetValue(PreviewPreferenceName) is { } saved) return saved is 1;
+            if (_updates.Current.Channel == 3) return false;
+            key.SetValue(PreviewPreferenceName, 1, RegistryValueKind.DWord);
+            return true;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or SecurityException) { return false; }
+    }
+
+    /// <summary>保存接收测试版的选择，撤下上一渠道的候选提示。已经由用户开始的下载或安装可继续完成。</summary>
+    private void ChangePreviewPreference(object? sender, EventArgs e)
+    {
+        _pendingUpdatePrompt = false;
+        if (_updateWindow?.HasAcceptedUpdate != true) ResetUpdateOffer();
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(_updatePreferenceKey);
+            key.SetValue(PreviewPreferenceName, _previewUpdates!.Checked ? 1 : 0, RegistryValueKind.DWord);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or SecurityException)
+        { SetUpdateStatus("本次选择未能保存，下次启动将沿用原设置。"); }
+    }
+
+    /// <summary>清除失效的候选、侧栏提示和旧弹窗，让下一次手动检查重新读取发布列表。</summary>
+    private void ResetUpdateOffer()
+    {
+        _pendingUpdatePrompt = false;
+        _updateOffer = null;
+        _updateWindow?.Dispose();
+        _updateWindow = null;
+        if (_checkUpdates != null) _checkUpdates.Text = "立即检查更新";
+        if (_homeSettings != null) _homeSettings.Text = "高级设置";
+        SetUpdateStatus("");
     }
 
     /// <summary>仅在正规发布构建中读取用户偏好。首次默认检查；系统拒绝读取时不主动联网。</summary>
@@ -85,15 +129,20 @@ internal sealed partial class ParchmentPreviewForm
     /// <summary>单窗口同一时刻只发起一次检查。超时、断网或频道数据不完整都不会被当作最新版。</summary>
     private async Task CheckUpdatesAsync(bool startup = false)
     {
-        if (_checkingUpdates || !_updates.IsConfigured || _checkUpdates == null) return;
+        if (_checkingUpdates || !_updates.IsConfigured || _checkUpdates == null || _previewUpdates == null) return;
         _checkingUpdates = true;
-        _checkUpdates.Enabled = false;
+        _checkUpdates.Enabled = _previewUpdates.Enabled = false;
         SetUpdateStatus("正在检查更新…");
         CancellationToken token = _updateLifetime.Token;
         try
         {
-            var offer = await _updates.CheckAsync(token);
+            var offer = await _updates.CheckAsync(token, _previewUpdates.Checked);
             if (token.IsCancellationRequested) return;
+            if (startup && offer != null && IsSkipped(offer.Version.Text))
+            {
+                SetUpdateStatus($"已跳过 {offer.Version.Text}。");
+                return;
+            }
             _updateOffer = offer;
             if (offer == null) { SetUpdateStatus("未发现可用的新版本。"); return; }
             _checkUpdates.Text = "查看可用更新";
@@ -101,7 +150,7 @@ internal sealed partial class ParchmentPreviewForm
             SetUpdateStatus($"可更新至 {offer.Version.Text}。");
             AppendLog($"发现 SideStage {offer.Version.Text}。");
             if (!startup) ShowUpdateOffer(offer);
-            else if (_startupUpdates?.Checked == true && !IsSkipped(offer.Version.Text))
+            else if (_startupUpdates?.Checked == true)
             {
                 _pendingUpdatePrompt = true;
                 TryPresentStartupUpdate();
@@ -114,7 +163,7 @@ internal sealed partial class ParchmentPreviewForm
         finally
         {
             _checkingUpdates = false;
-            if (!token.IsCancellationRequested && !_checkUpdates.IsDisposed) _checkUpdates.Enabled = true;
+            if (!token.IsCancellationRequested && !_checkUpdates.IsDisposed) _checkUpdates.Enabled = _previewUpdates.Enabled = true;
         }
     }
 
@@ -153,9 +202,12 @@ internal sealed partial class ParchmentPreviewForm
     {
         _pendingUpdatePrompt = false;
         _updateWindow ??= new(_updates.Current, offer,
-            (source, progress, cancel) => new UpdateDownload().FetchAsync(offer, source, _updates.SigningKey, progress, cancel),
+            (source, progress, cancel) => StartupUserAccess.AsUser(() =>
+                new UpdateDownload().FetchAsync(offer, source, _updates.SigningKey, progress, cancel)),
             InstallUpdateAsync, () =>
             {
+                ResetUpdateOffer();
+                SetUpdateStatus($"已跳过 {offer.Version.Text}。");
                 try { using var key = Registry.CurrentUser.CreateSubKey(_updatePreferenceKey); key.SetValue("SkippedUpdate", offer.Version.Text); }
                 catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or SecurityException)
                 { SetUpdateStatus("本次已跳过，未能保存到下次启动。"); }
@@ -165,7 +217,7 @@ internal sealed partial class ParchmentPreviewForm
                 if (_checkUpdates != null) _checkUpdates.Text = "查看待安装更新";
                 if (_homeSettings != null) _homeSettings.Text = "设置 · 待安装";
                 SetUpdateStatus($"{offer.Version.Text} 已下载，等待安装。");
-            }, enterStandardMode: _canReturnToLauncher || StartupElevation.IsAdministrator() ? EnterStandardUpdateModeAsync : null);
+            });
         if (!_updateWindow.Visible)
         {
             _updateWindow.StartPosition = FormStartPosition.Manual;
@@ -174,29 +226,6 @@ internal sealed partial class ParchmentPreviewForm
             _updateWindow.Show(this);
         }
         _updateWindow.Activate();
-    }
-
-    /// <summary>
-    /// 让原始普通权限启动器接手更新。已连接时先确认并仅断开预览，关闭被取消则保持现有窗口。
-    /// 手动从高权限环境独立启动时，告知用户如何从开始菜单进入普通模式。
-    /// </summary>
-    private async Task EnterStandardUpdateModeAsync()
-    {
-        if (!_canReturnToLauncher)
-            throw new InvalidOperationException("请从开始菜单正常打开 SideStage，在授权提示中选“否”，再点「检查更新」。更新前请先断开正在使用的连接并退出管理员窗口。");
-        if (_preparingUpdate) return;
-        _preparingUpdate = true;
-        try
-        {
-            Enabled = false;
-            ContinueUpdateInLauncher = await CloseForUpdateAsync();
-        }
-        finally
-        {
-            _exitingForUpdate = false;
-            _preparingUpdate = false;
-            if (!IsDisposed) Enabled = true;
-        }
     }
 
     /// <summary>等待更新器就绪后再断开；若取消、断开超时或关闭被否决，管道不提交，安装便不会开始。</summary>
@@ -224,7 +253,7 @@ internal sealed partial class ParchmentPreviewForm
         }
     }
 
-    /// <summary>取得明确同意后断开预览并保留子会话。更新器和普通权限启动器只有在窗口实际退出后才能接手。</summary>
+    /// <summary>取得明确同意后断开预览并保留子会话，窗口实际退出后才提交安装。</summary>
     private async Task<bool> CloseForUpdateAsync()
     {
         if (UpdateConnectionActive() && MessageBox.Show(_updateWindow,

@@ -24,6 +24,23 @@ public sealed class ReleaseUpdateFeedTests
         Assert.AreEqual("https://github.com/example/SideStage/releases/tag/v1.1.0", offer?.Page.AbsoluteUri);
     }
 
+    /// <summary>两个发布源按显式订阅筛选。正式版可以试用测试包，取消订阅的测试版只向更高正式版升级。</summary>
+    [TestMethod]
+    [DataRow("1.0.0", true, "1.2.0-beta.1")]
+    [DataRow("1.0.0-beta.1", false, "1.1.0")]
+    [DataRow("1.2.0-beta.1", false, null)]
+    public async Task SubscriptionOverridesInstalledChannel(string current, bool subscribe, string? expected)
+    {
+        foreach (bool domestic in new[] { false, true })
+        {
+            using HttpClient http = new(new Handler(_ => domestic
+                ? Json(new[] { MirrorEntry("1.2.0-beta.1", prerelease: true), MirrorEntry("1.1.0") })
+                : Json(new[] { Entry("v1.2.0-beta.1", prerelease: true), Entry("v1.1.0") })));
+            var feed = new ReleaseUpdateFeed(http, current, domestic ? null : "a/b", domestic ? "c/d" : null);
+            Assert.AreEqual(expected, (await feed.CheckAsync(default, subscribe))?.Version.Text);
+        }
+    }
+
     /// <summary>第一页填满时继续请求后续页；测试渠道按数字序号比较，且可升级到同主版本正式版。</summary>
     [TestMethod]
     public async Task BetaPaginatesAndCanGraduateToStable()

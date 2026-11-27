@@ -59,6 +59,8 @@ Name: "{userdesktop}\SideStage"; Filename: "{app}\SideStage.exe"; WorkingDir: "{
 Filename: "{app}\SideStage.exe"; Description: "{cm:LaunchProgram,SideStage}"; Flags: nowait postinstall skipifsilent
 
 [CustomMessages]
+zhcn.RestoreFailed=尚有启动项未能恢复。请查看 %1，处理后重试。取消将停止卸载并保留恢复所需的文件。
+en.RestoreFailed=Some startup entries could not be restored. Check %1 and retry. Cancel stops uninstallation and keeps the recovery files.
 zhcn.UpgradeTitle=更新 SideStage
 en.UpgradeTitle=Update SideStage
 zhcn.RepairTitle=重新安装 SideStage
@@ -105,6 +107,25 @@ const
 var
   InstalledVersion, InstalledDir: String;
   IsRepair: Boolean;
+
+{ 用户确认卸载后、移除文件前逐项恢复。静默卸载遇错直接停止；交互卸载可以重试。 }
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Code: Integer;
+  Args, ReportPath: String;
+begin
+  if CurUninstallStep <> usUninstall then exit;
+  Args := '--restore-startup-items';
+  if UninstallSilent then Args := Args + ' --silent';
+  ReportPath := ExpandConstant('{localappdata}\SideStage\StartupGate\restore-errors.txt');
+  repeat
+    if Exec(ExpandConstant('{app}\SideStage.exe'), Args, ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Code) then
+      if Code = 0 then exit;
+    Log('Startup restore failed: ' + IntToStr(Code));
+    if UninstallSilent then Abort;
+    if MsgBox(FmtMessage(CustomMessage('RestoreFailed'), [ReportPath]), mbError, MB_RETRYCANCEL) <> IDRETRY then Abort;
+  until False;
+end;
 
 { 将发行版本拆为三段主版本、渠道顺序和渠道序号。正式版排在同一主版本的所有测试版之后。 }
 function ReadVersion(Value: String; var Core: Int64; var Channel, Serial: Integer): Boolean;

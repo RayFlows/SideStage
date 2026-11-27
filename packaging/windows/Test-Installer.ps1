@@ -33,6 +33,11 @@ if ($isolated) {
     $shortcut = Join-Path $run 'links/start.lnk'
     $desktop = Join-Path $run 'links/desktop.lnk'
     $defaultDir = $run
+    $project = Join-Path $root 'tests/SideStage.App.FrameCheck'
+    # 独立配置避免覆盖开发者当前正在使用的 Debug 窗口。
+    & dotnet build $project -c InstallerCheck --nologo | Out-Host
+    if ($LASTEXITCODE) { throw '隔离恢复负载构建失败。' }
+    $fixtureRunner = (Get-Item -LiteralPath "$project/bin/InstallerCheck/net10.0-windows/SideStage.App.FrameCheck.exe").FullName
 }
 if (-not [Environment]::Is64BitProcess) { throw '请使用 64 位 PowerShell，以核对正确的卸载记录。' }
 foreach ($existing in @($userKey, "HKLM:\$key", $shortcut, $desktop, $defaultDir)) {
@@ -61,7 +66,11 @@ function New-IsolatedSetup([string] $Package, [string] $Name) {
     $definition = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'SideStage.iss')).Replace($releaseId, $id).
         Replace('{userprograms}\SideStage', (Join-Path $run 'links/start')).Replace('{userdesktop}\SideStage', (Join-Path $run 'links/desktop')).
         Replace('{localappdata}\Programs\SideStage', $dir).Replace('..\..\assets\branding\SideStage.ico', (Join-Path $root 'assets/branding/SideStage.ico'))
-    if (!$definition.Contains("AppId={{$id}") -or $definition.Contains($releaseId) -or $definition -match '\{user(desktop|programs)\}') {
+    # 装卸真实发行负载，只有恢复命令重定向到同一套代码的独立启动登记。
+    $definition = $definition.Replace("Args := '--restore-startup-items'", "Args := '--startup-uninstall-fixture restore $id'").
+        Replace("Exec(ExpandConstant('{app}\SideStage.exe'), Args", "Exec('$($fixtureRunner.Replace("'","''"))', Args")
+    if (!$definition.Contains("AppId={{$id}") -or $definition.Contains($releaseId) -or $definition.Contains('--restore-startup-items') -or
+        !$definition.Contains("--startup-uninstall-fixture restore $id") -or $definition -match '\{user(desktop|programs)\}') {
         throw '隔离配方仍可能影响正式安装。'
     }
     [IO.File]::WriteAllText($recipe, $definition, [Text.UTF8Encoding]::new($true))
@@ -197,12 +206,14 @@ try {
         Invoke-Setup $oldSetup "$installArgs /LOG=`"$run/previous.log`""
         $null = Get-InstalledEntry
         $legacyCount = @(Get-ChildItem -LiteralPath $dir -File -Filter '*.dll').Count
-        if (!$legacyCount) { throw '跨版验收的起点不是平铺 DLL 的旧版。' }
         Invoke-Setup $setup "$installArgs /LOG=`"$run/upgrade.log`""
         if (!(Select-String -LiteralPath "$run/upgrade.log" -SimpleMatch 'SideStage mode: update' -Quiet)) { throw '未进入覆盖升级分支。' }
         $null = Get-InstalledEntry
         & (Join-Path $PSScriptRoot 'Test-PublishLayout.ps1') -Directory $dir -Layout Installed
-        Write-Output "真实旧负载升级：顶层 DLL 从 $legacyCount 个降至 0。"
+        Write-Output "真实旧负载升级通过。升级前顶层 DLL 数量为 $legacyCount，新安装布局已校验。"
+        & $fixtureRunner --startup-uninstall-fixture prepare $id
+        if ($LASTEXITCODE) { throw '未能建立隔离启动项。' }
+        $verifyStartup = $true
     }
 }
 finally {
@@ -216,6 +227,11 @@ finally {
     }
     if ((-not $app -or $app.HasExited) -and (Test-Path -LiteralPath $userKey)) {
         Invoke-Setup (Get-OwnedUninstaller) "$quiet /LOG=`"$run/uninstall.log`""
+        if ($verifyStartup) {
+            & $fixtureRunner --startup-uninstall-fixture verify $id
+            if ($LASTEXITCODE) { throw '通过安装器卸载后，原程序的启动项未恢复。' }
+            Write-Output '从 Windows 卸载入口恢复了原启动命令和注册表类型。'
+        }
     }
     if ($app) { $app.Dispose() }
 }

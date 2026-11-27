@@ -1,6 +1,6 @@
 /*
  * 文件名称：StartupElevationTests.cs
- * 文件职责：验证启动偏好、单次授权、账户一致性和管理员窗口退出后的更新分派。
+ * 文件职责：验证启动偏好、单次授权、账户一致性和管理员窗口退出后的启动器行为。
  * 验收边界：只使用随机注册表子项和模拟授权进程，不触发系统 UAC。
  */
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -29,7 +29,7 @@ public sealed class StartupElevationTests
         finally { Registry.CurrentUser.DeleteSubKey(path, false); }
     }
 
-    /// <summary>取消授权时继续普通启动，管理员窗口请求更新时回到普通启动器，平时退出则同步结束。</summary>
+    /// <summary>取消授权时继续普通启动，管理员窗口退出后启动器同步结束，不再创建第二个更新窗口。</summary>
     [TestMethod]
     public void InitialLaunchAsksOnceAndRoutesChildExit()
     {
@@ -38,7 +38,7 @@ public sealed class StartupElevationTests
             () => true, (mode, sid) => { calls.Add(mode); Assert.AreEqual(User, sid); return exit; });
         Assert.AreEqual(StartupRoute.Home, Run(false, StartupElevation.DifferentAccountExitCode));
         Assert.AreEqual(StartupRoute.Exit, Run(true, 0));
-        Assert.AreEqual(StartupRoute.Update, Run(false, StartupElevation.UpdateExitCode));
+        Assert.AreEqual(StartupRoute.Exit, Run(false, 0));
         CollectionAssert.AreEqual(new[] { false, true, false }, calls);
     }
 
@@ -51,7 +51,7 @@ public sealed class StartupElevationTests
         Assert.AreEqual(StartupRoute.Home, Run([], false, false));
         Assert.AreEqual(StartupRoute.Home, Run([], true));
         Assert.AreEqual(StartupRoute.Home, Run(["--standard"], false));
-        Assert.AreEqual(StartupRoute.AuthorizedHome, Run(["--authorized-window", User], true));
+        Assert.AreEqual(StartupRoute.Home, Run(["--authorized-window", User], true));
         Assert.AreEqual(StartupRoute.DifferentAccount, Run(["--authorized-window", User], false));
         Assert.AreEqual(StartupRoute.DifferentAccount, Run(["--authorized-window", User + "1"], true));
     }

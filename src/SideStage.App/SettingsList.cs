@@ -125,19 +125,27 @@ internal sealed class SettingsSwitch : CheckBox
         Color fill = PaperFieldSurface.RowColor(this, Focused && ShowFocusCues, Capture && MouseButtons == MouseButtons.Left);
         PaperFieldSurface.Paint(e.Graphics, this, fill);
         Rectangle text = PaperFieldSurface.Content(this);
+        int right = text.Right;
+        text.Width = Math.Max(0, text.Width - LogicalToDeviceUnits(44));
         TextRenderer.DrawText(e.Graphics, Text, Font, text, Enabled ? PaperFieldSurface.Ink : SystemColors.GrayText,
             PaperFieldSurface.RowText);
-        int w = LogicalToDeviceUnits(36), h = LogicalToDeviceUnits(20), inset = LogicalToDeviceUnits(2);
-        Rectangle track = new(text.Right - w, (Height - h) / 2, w, h);
+        DrawTrack(e.Graphics, this, right, Checked);
+    }
+
+    /// <summary>让普通偏好与应用行共用相同的滑块尺寸、配色与对齐方式。</summary>
+    internal static void DrawTrack(Graphics graphics, Control row, int right, bool active)
+    {
+        int w = row.LogicalToDeviceUnits(36), h = row.LogicalToDeviceUnits(20), inset = row.LogicalToDeviceUnits(2);
+        Rectangle track = new(right - w, (row.Height - h) / 2, w, h);
         using GraphicsPath path = new();
         path.AddArc(track.X, track.Y, h, h, 90, 180);
         path.AddArc(track.Right - h, track.Y, h, h, 270, 180);
         path.CloseFigure();
-        using SolidBrush brush = new(!Enabled ? Color.FromArgb(207, 202, 192) :
-            Checked ? Color.FromArgb(71, 113, 95) : Color.FromArgb(158, 150, 134));
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        e.Graphics.FillPath(brush, path);
-        e.Graphics.FillEllipse(Brushes.White, (Checked ? track.Right - h : track.Left) + inset,
+        using SolidBrush brush = new(!row.Enabled ? Color.FromArgb(207, 202, 192) :
+            active ? Color.FromArgb(71, 113, 95) : Color.FromArgb(158, 150, 134));
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.FillPath(brush, path);
+        graphics.FillEllipse(Brushes.White, (active ? track.Right - h : track.Left) + inset,
             track.Top + inset, h - 2 * inset, h - 2 * inset);
     }
 }

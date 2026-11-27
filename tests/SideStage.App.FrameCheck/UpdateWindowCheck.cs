@@ -35,7 +35,6 @@ internal static class UpdateWindowCheck
     /// <summary>打开生产窗体，截取初始界面，再通过真实按钮测试用户可见的状态转换。</summary>
     internal static int Run(string image)
     {
-        CheckAdministratorEntry();
         var offer = Sample() with { Notes = UpdateEntryTrial.Notes };
         var download = new TaskCompletionSource<VerifiedUpdate>();
         int installed = 0, skipped = 0, ready = 0;
@@ -210,21 +209,6 @@ internal static class UpdateWindowCheck
             for (int x = 0; x < rendered.Width; x++)
                 if (Math.Abs(rendered.GetPixel(x, y).GetBrightness() - body.BackColor.GetBrightness()) > .25f) return;
         throw new InvalidOperationException("无显式换行的中文长段落未在第二行画出文字。");
-    }
-
-    /// <summary>在真实更新窗口中验证管理员入口只请求切换权限，下载源和安装操作由普通窗口提供。</summary>
-    private static void CheckAdministratorEntry()
-    {
-        int switches = 0;
-        using var window = new ReleaseUpdateWindow(ReleaseVersion.Parse("0.1.0-beta.5")!, Sample(),
-            (_, _, _) => throw new InvalidOperationException("管理员窗口开始下载。"),
-            _ => throw new InvalidOperationException("管理员窗口开始安装。"), () => { }, CancellationToken.None,
-            enterStandardMode: () => { switches++; return Task.CompletedTask; });
-        window.Show();
-        Control[] fields = Enumerate(window).ToArray();
-        fields.OfType<Button>().Single(button => button.Text == "以普通权限更新").PerformClick();
-        if (switches != 1 || fields.OfType<ReleaseSourceOption>().Any())
-            throw new InvalidOperationException("管理员窗口没有正确进入普通权限更新流程。");
     }
 
     /// <summary>按实际状态驱动消息循环，超时报告测试失败，避免任意延时造成偶发结果。</summary>
