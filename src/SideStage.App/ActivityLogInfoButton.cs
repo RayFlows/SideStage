@@ -24,6 +24,10 @@ internal class PaperInfoButton : Button
     /// <summary>当前已展开气泡的实际屏幕范围，包含 Windows 对位置的自动调整。</summary>
     internal Rectangle BubbleBounds => _popup.Visible ? _popup.Bounds : Rectangle.Empty;
 
+    /// <summary>为受权限限制的设置创建黄铜色三角提示，沿用普通说明气泡的悬停和键盘交互。</summary>
+    internal static PaperInfoButton PrivilegeWarning(Font iconFont, Font bodyFont, string title, string note) =>
+        new(iconFont, bodyFont, title, note) { Text = "\uE7BA", ForeColor = Color.FromArgb(156, 109, 26) };
+
     /// <summary>按正文、原生链接、补充说明的顺序布局。链接目标和打开动作由调用方提供。</summary>
     internal PaperInfoButton(Font iconFont, Font bodyFont, string title, string note, string? linkText = null, Action? openLink = null,
         string? footer = null)

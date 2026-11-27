@@ -3,7 +3,7 @@
     在随机安装标识下验证首次安装、覆盖升级、同版本重装、文件占用和拒绝降级。
 .DESCRIPTION
     从正式 Inno 脚本生成只更换安装标识、默认路径和快捷方式位置的验收副本。
-    测试负载只有一个不执行的占位文件；不覆盖正式 SideStage，不操作用户凭据或会话。
+    测试负载只报告模拟的启动项恢复结果，用隔离目录验证卸载失败和重试。
 .PARAMETER Iscc
     Inno Setup 6.x 编译器路径；运行 Build-Installer.ps1 后可复用已校验的中文语言文件。
 #>
@@ -21,7 +21,22 @@ $realId = '28C18EA6-CBC7-4C56-AFC2-A5307EAD9573'
 if ((Test-Path -LiteralPath $run) -or (Test-Path -LiteralPath $key)) { throw '隔离测试位置已被占用。' }
 $null = New-Item -ItemType Directory -Path $payload
 $icon = Join-Path $root 'assets/branding/SideStage.ico'
-Copy-Item -LiteralPath $icon -Destination (Join-Path $payload 'SideStage.exe')
+# 独立的验收程序只认卸载命令；标记文件由本脚本控制，不访问实际启动登记。
+$fixtureSource = @'
+using System;
+using System.IO;
+internal class RestoreFixture {
+    /// <summary>在隔离安装目录中模拟恢复命令的成功和失败。</summary>
+    public static int Main(string[] args) {
+        return args.Length == 2 && args[0] == "--restore-startup-items" && args[1] == "--silent" &&
+            !File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "restore-failure.test")) ? 0 : 1;
+    }
+}
+'@
+$fixtureFile = Join-Path $run 'RestoreFixture.cs'
+[IO.File]::WriteAllText($fixtureFile, $fixtureSource)
+& "$env:SystemRoot/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /nologo /target:winexe "/out:$payload/SideStage.exe" $fixtureFile
+if ($LASTEXITCODE) { throw '卸载验收负载编译失败。' }
 $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'SideStage.iss')).Replace($realId, $id).
     Replace('{userprograms}\SideStage', '{app}\links\start').Replace('{userdesktop}\SideStage', '{app}\links\desktop').
     Replace('{localappdata}\Programs\SideStage', $dir).Replace('..\..\assets\branding\SideStage.ico', $icon).
@@ -90,7 +105,16 @@ finally {
         $uninstall = [IO.Path]::GetFullPath($entry.UninstallString.Trim('"'))
         if ($entry.InstallLocation.TrimEnd('\') -ne $dir -or [IO.Path]::GetDirectoryName($uninstall) -ne $dir -or
             [IO.Path]::GetFileName($uninstall) -notmatch '^unins[0-9]{3}\.exe$') { throw '卸载记录不属于本次验收，不执行卸载。' }
+        $marker = Join-Path $dir 'restore-failure.test'
+        try {
+            [IO.File]::WriteAllText($marker, 'failure')
+            $attempt = Start-Process -FilePath $uninstall -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru -WindowStyle Hidden
+            if (!(Test-Path -LiteralPath $key) -or !(Test-Path -LiteralPath "$dir/SideStage.exe") -or $attempt.ExitCode -eq 0) {
+                throw '恢复失败后卸载器未报告失败或提前移除了安装文件。'
+            }
+        } finally { if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker } }
         $p = Start-Process -FilePath $uninstall -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru -WindowStyle Hidden
         if ($p.ExitCode -ne 0 -or (Test-Path -LiteralPath $key)) { throw '隔离验收记录未清理。' }
+        Write-Output '启动项恢复失败时停止卸载，通过重试后正常卸载。'
     }
 }

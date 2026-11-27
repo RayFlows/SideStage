@@ -11,25 +11,71 @@ namespace SideStage.App;
 
 internal static class StartupUserAccess
 {
-    /// <summary>在 UAC 分离令牌的管理员窗口中切回关联的受限令牌，普通窗口直接执行。</summary>
+    /// <summary>普通窗口沿用自身权限。管理员窗口从本进程派生同一账户的普通用户令牌，仅在回调期间使用。</summary>
     internal static T AsUser<T>(Func<T> operation)
     {
-        const int elevationType = 18, linkedToken = 19, full = 2;
         using var identity = WindowsIdentity.GetCurrent();
-        if (!GetElevation(identity.AccessToken, elevationType, out int type, sizeof(int), out _))
-            throw new Win32Exception(Marshal.GetLastWin32Error());
-        if (type != full) return operation();
-        if (!GetLinked(identity.AccessToken, linkedToken, out var token, IntPtr.Size, out _))
-            throw new Win32Exception(Marshal.GetLastWin32Error());
-        using var limited = new SafeAccessTokenHandle(token);
-        return WindowsIdentity.RunImpersonated(limited, operation);
+        if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)) return operation();
+
+        // UAC 的关联令牌可能只可识别身份，无法用于创建互斥锁或写入。SAFER 从自己的令牌派生可执行的普通权限上下文。
+        const uint machineScope = 1, normalUser = 0x20000, openLevel = 1;
+        if (!SaferCreateLevel(machineScope, normalUser, openLevel, out var level, IntPtr.Zero)) throw LastError();
+        try
+        {
+            if (!SaferComputeTokenFromLevel(level, identity.AccessToken, out var token, 0, IntPtr.Zero)) throw LastError();
+            using (token)
+            {
+                SetMediumIntegrity(token);
+                return WindowsIdentity.RunImpersonated(token, () =>
+                {
+                    using var effective = WindowsIdentity.GetCurrent();
+                    if (effective.User != identity.User || new WindowsPrincipal(effective).IsInRole(WindowsBuiltInRole.Administrator))
+                        throw new UnauthorizedAccessException("无法以当前账户的普通权限修改启动项。");
+                    return operation();
+                });
+            }
+        }
+        finally { SaferCloseLevel(level); }
     }
 
-    /// <summary>查询当前令牌是否属于 UAC 拆分后已提权的一半。</summary>
-    [DllImport("advapi32.dll", EntryPoint = "GetTokenInformation", SetLastError = true)]
-    private static extern bool GetElevation(SafeAccessTokenHandle token, int info, out int value, int size, out int written);
+    /// <summary>将派生令牌的完整性限制在普通桌面级别，保证其新建的文件和内核对象可以由普通窗口继续操作。</summary>
+    private static void SetMediumIntegrity(SafeAccessTokenHandle token)
+    {
+        var sid = new SecurityIdentifier(WellKnownSidType.WinMediumLabelSid, null);
+        var bytes = new byte[sid.BinaryLength];
+        sid.GetBinaryForm(bytes, 0);
+        var pinned = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+        try
+        {
+            var label = new MandatoryLabel { Sid = pinned.AddrOfPinnedObject(), Attributes = 0x20 };
+            const int tokenIntegrityLevel = 25;
+            if (!SetTokenInformation(token, tokenIntegrityLevel, ref label, Marshal.SizeOf<MandatoryLabel>() + bytes.Length))
+                throw LastError();
+        }
+        finally { pinned.Free(); }
+    }
 
-    /// <summary>取得同一用户的关联令牌，返回的句柄由调用方释放。</summary>
-    [DllImport("advapi32.dll", EntryPoint = "GetTokenInformation", SetLastError = true)]
-    private static extern bool GetLinked(SafeAccessTokenHandle token, int info, out IntPtr value, int size, out int written);
+    /// <summary>在下一次系统调用覆盖错误码之前，记录 Windows 的失败原因。</summary>
+    private static Win32Exception LastError() => new(Marshal.GetLastWin32Error());
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MandatoryLabel { internal IntPtr Sid; internal uint Attributes; }
+
+    /// <summary>打开 Windows 定义的标准权限级别，由本类负责关闭。</summary>
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool SaferCreateLevel(uint scope, uint level, uint flags, out IntPtr handle, IntPtr reserved);
+
+    /// <summary>从指定账户自己的访问令牌派生受限令牌，由安全句柄负责释放。</summary>
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool SaferComputeTokenFromLevel(IntPtr level, SafeAccessTokenHandle original,
+        out SafeAccessTokenHandle token, uint flags, IntPtr reserved);
+
+    /// <summary>释放权限级别句柄，结束本次降权操作。</summary>
+    [DllImport("advapi32.dll")]
+    private static extern bool SaferCloseLevel(IntPtr level);
+
+    /// <summary>为专属的派生令牌写入完整性标签。</summary>
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool SetTokenInformation(SafeAccessTokenHandle token, int informationClass,
+        ref MandatoryLabel label, int length);
 }

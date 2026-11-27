@@ -17,12 +17,16 @@ internal sealed class StartupTaskRules : IDisposable
     private readonly string _sid;
     private readonly string _account;
     private readonly string _directory;
+    private readonly bool _protectedStore;
     private string Gate => Path.Combine(_directory, "SideStage.StartupGate.exe");
     private static readonly XNamespace Ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
 
     /// <summary>连接本机计划任务服务。只接受当前 SID 或当前完整账户名。</summary>
-    internal StartupTaskRules(string directory)
+    internal StartupTaskRules(string directory, bool protectedStore = false)
     {
+        if (protectedStore && !directory.Equals(ProtectedStartupStore.Location, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("管理员任务只能使用固定的受保护目录。");
+        _protectedStore = protectedStore;
         _directory = directory;
         using var user = WindowsIdentity.GetCurrent();
         _sid = user.User!.Value;
@@ -34,12 +38,38 @@ internal sealed class StartupTaskRules : IDisposable
     /// <summary>按现有清单中的完整路径取实时定义，无法查询的登记保留只读状态。</summary>
     internal StartupEntry Inspect(StartupEntry seed)
     {
-        try { return WithTask(seed, (_, task) => Describe(seed, XDocument.Parse((string)task.Xml), (bool)task.Enabled)); }
+        try { return WithTask(seed, (_, task) => ReadTask(seed, task, XDocument.Parse((string)task.Xml))); }
         catch (Exception ex) when (ex is COMException or IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {
             return seed with { Fingerprint = null, WindowsEnabled = null, RepeatPolicy = StartupRepeatPolicy.Unknown,
                 ReadOnlyReason = IsProtected(seed.Detail) ? MaintenanceReason(seed.Detail) : "无法读取任务定义" };
         }
+    }
+
+    /// <summary>先识别任务的用途与运行账户，再核对实际修改任务的权限。两种账户可以不同。</summary>
+    private StartupEntry ReadTask(StartupEntry seed, dynamic task, XDocument doc)
+    {
+        var entry = Describe(seed, doc, (bool)task.Enabled);
+        if (entry.ReadOnlyReason != null && !entry.Blocked) return entry;
+        try
+        {
+            const int ownerGroupDacl = 7;
+            string acl = task.GetSecurityDescriptor(ownerGroupDacl);
+            bool ordinary = StartupTaskAccess.CanWrite(acl);
+            if (_protectedStore)
+            {
+                if (ordinary && !entry.Blocked) return entry with { ReadOnlyReason = "请按普通用户任务处理", Fingerprint = null };
+                if (!StartupElevation.IsAdministrator()) return entry with { ReadOnlyReason = "需要管理员权限修改此个人任务", Fingerprint = null };
+                return StartupTaskAccess.CanWrite(acl, ordinary: false) ? entry
+                    : entry with { ReadOnlyReason = "任务权限不允许当前管理员写入", Fingerprint = null };
+            }
+            if (ordinary && !entry.RequiresAdmin) return entry;
+            return entry with { ReadOnlyReason = "当前账户没有此计划任务的写入权限", Fingerprint = null,
+                RequiresAdmin = !entry.Blocked };
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or COMException or System.ComponentModel.Win32Exception
+            or ArgumentException or System.Security.SecurityException)
+        { return entry with { ReadOnlyReason = "无法确认此计划任务的写入权限", Fingerprint = null }; }
     }
 
     /// <summary>只有单次登录触发、单个普通 EXE 动作、当前交互用户三者同时成立时才允许托管。</summary>
@@ -58,7 +88,8 @@ internal sealed class StartupTaskRules : IDisposable
             "StopExisting" => StartupRepeatPolicy.StopExisting,
             _ => StartupRepeatPolicy.Unknown
         };
-        seed = seed with { WindowsEnabled = loginEnabled, RepeatPolicy = policy };
+        seed = seed with { WindowsEnabled = loginEnabled, RepeatPolicy = policy, RequiresAdmin = _protectedStore,
+            ReadOnlyReason = null, Blocked = false };
         if (IsProtected(seed.Detail))
             return seed with { ReadOnlyReason = MaintenanceReason(seed.Detail), Fingerprint = null, Blocked = false };
         var principals = root.Element(Ns + "Principals")?.Elements().ToArray() ?? [];
@@ -72,9 +103,14 @@ internal sealed class StartupTaskRules : IDisposable
             : triggers.Length != 1 || triggers[0].Name != Ns + "LogonTrigger" || exec == null ? "复合计划任务" : null;
         string target = ((string?)exec?.Element(Ns + "Command") ?? "").Trim('"');
         string args = (string?)exec?.Element(Ns + "Arguments") ?? "";
+        if (!_protectedStore && target.Equals(Path.Combine(ProtectedStartupStore.Location, "SideStage.StartupGate.exe"), StringComparison.OrdinalIgnoreCase))
+            return seed with { RequiresAdmin = true, ReadOnlyReason = "需要核对受保护的原动作", Fingerprint = null };
+        if (_protectedStore && target.Equals(Path.Combine(StartupRegistrations.DefaultGateDirectory, "SideStage.StartupGate.exe"), StringComparison.OrdinalIgnoreCase))
+            return seed with { ReadOnlyReason = "个人目录的原动作只允许由普通权限恢复", Fingerprint = null };
         bool managed = reason == null && target.Equals(Gate, StringComparison.OrdinalIgnoreCase) && Guid.TryParseExact(args, "N", out _);
         if (managed)
         {
+            if (_protectedStore) ProtectedStartupStore.Validate(false);
             var backup = ReadBackup(args, seed);
             if (backup == null) return seed with { Blocked = true, Fingerprint = null, ReadOnlyReason = "原始任务动作备份缺失" };
             target = ((string?)backup.Element(Ns + "Command") ?? "").Trim('"');
@@ -93,14 +129,16 @@ internal sealed class StartupTaskRules : IDisposable
     }
 
     /// <summary>提交前再次核验完整定义，使用仅更新标志并保留已有权限，不重新触发登记事件。</summary>
-    internal StartupEntry Change(StartupEntry snapshot, bool allowed, Func<string> prepare)
+    internal StartupEntry Change(StartupEntry snapshot, bool allowed, Func<string> prepare, string? confirmedTriggerUser = null)
     {
         return WithTask(snapshot, (folder, task) =>
         {
             string raw = task.Xml;
             var doc = XDocument.Parse(raw);
-            var live = Describe(snapshot, doc, (bool)task.Enabled);
+            StartupEntry live = ReadTask(snapshot, task, doc);
             StartupRegistrations.Verify(snapshot, live, allowed);
+            if (_protectedStore != live.RequiresAdmin) throw new IOException("任务写入权限已变化，请重新扫描。");
+            ApplyTriggerRepair(doc, confirmedTriggerUser);
             var action = doc.Root!.Element(Ns + "Actions")!.Element(Ns + "Exec")!;
             string id;
             if (allowed)
@@ -117,7 +155,6 @@ internal sealed class StartupTaskRules : IDisposable
                 if (action.Element(Ns + "Arguments") is { } args) args.Value = id;
                 else action.Element(Ns + "Command")!.AddAfterSelf(new XElement(Ns + "Arguments", id));
             }
-            try
             {
                 // 从服务重新打开，防止用已经被厂商更新的旧 COM 快照提交。
                 var latest = Inspect(snapshot);
@@ -127,22 +164,128 @@ internal sealed class StartupTaskRules : IDisposable
                     updateOnly | preserveAcl | ignoreRegistrationTriggers, _sid, null, interactive, null);
                 Marshal.FinalReleaseComObject(updated);
             }
-            catch { if (!allowed) StartupRegistrations.Retire(BackupPath(id)); throw; }
+            var result = WithTask(snapshot, (_, updated) =>
+            {
+                var actual = XDocument.Parse((string)updated.Xml);
+                if (!XNode.DeepEquals(ActionContent(actual), ActionContent(doc)))
+                    throw new IOException("未能核实计划任务的实际动作，已保留备份。");
+                return ReadTask(snapshot, updated, actual);
+            });
             if (allowed) StartupRegistrations.Retire(BackupPath(id));
-            return Inspect(snapshot);
+            return result;
         });
     }
 
-    /// <summary>卸载时只通过自己的备份定位任务。已删除或已改写的任务不会被重新创建。</summary>
-    internal IEnumerable<StartupEntry> Managed()
+    /// <summary>动作从独立备份转入任务时可能自带 xmlns 声明。比较展开后的 XML 名称、属性和内容。</summary>
+    private static XElement ActionContent(XDocument document)
     {
-        foreach (var file in Directory.EnumerateFiles(_directory, "*.task"))
+        var actions = new XElement(document.Root!.Element(Ns + "Actions")!);
+        actions.DescendantsAndSelf().Attributes().Where(attribute => attribute.IsNamespaceDeclaration).Remove();
+        return actions;
+    }
+
+    /// <summary>所有通过个人任务核验的登记都按同一规则解析登录触发器。只有 Windows 无法映射且用户确认旧值时才修复。</summary>
+    internal void ApplyTriggerRepair(XDocument doc, string? confirmedTriggerUser)
+    {
+        var trigger = doc.Root!.Element(Ns + "Triggers")?.Element(Ns + "LogonTrigger")?.Element(Ns + "UserId");
+        string? triggerUser = (string?)trigger;
+        if (string.IsNullOrWhiteSpace(triggerUser) || string.Equals(triggerUser, _sid, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(triggerUser, _account, StringComparison.OrdinalIgnoreCase)) return;
+        try
+        {
+            if (triggerUser.StartsWith("S-1-", StringComparison.OrdinalIgnoreCase))
+                _ = new SecurityIdentifier(triggerUser).Translate(typeof(NTAccount));
+            else _ = new NTAccount(triggerUser).Translate(typeof(SecurityIdentifier));
+        }
+        catch (IdentityNotMappedException)
+        {
+            if (!string.Equals(confirmedTriggerUser, triggerUser, StringComparison.Ordinal))
+                throw new StartupTriggerRepairRequired(triggerUser, _account);
+            trigger!.Value = _sid;
+        }
+    }
+
+    /// <summary>独立检查每份备份和实时任务；随后在可见任务中补查丢失备份或被移动的引用。</summary>
+    internal bool RestoreManaged(Action<StartupEntry> restore, List<string> failures)
+    {
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in Directory.Exists(_directory) ? Directory.EnumerateFiles(_directory, "*.task") : [])
         {
             if (!Guid.TryParseExact(Path.GetFileNameWithoutExtension(file), "N", out _)) continue;
-            var backup = XElement.Load(file);
-            if ((string?)backup.Attribute("Name") is not { } name || (string?)backup.Attribute("Folder") is not { } folder) continue;
-            var entry = Inspect(new("Task", name, folder));
-            if (entry.Blocked) yield return entry;
+            try
+            {
+                var backup = XElement.Load(file);
+                if ((string?)backup.Attribute("Name") is not { } name || (string?)backup.Attribute("Folder") is not { } folder)
+                    throw new InvalidDataException("找不到原任务的位置。");
+                var seed = new StartupEntry("Task", name, folder);
+                WithTask(seed, (_, task) => { Check(seed, task); return true; });
+            }
+            catch (Exception error) when (error.HResult is unchecked((int)0x80070002) or unchecked((int)0x80070003))
+            { /* 原任务已被应用移除。 */ }
+            catch (Exception error) when (StartupRuleBatch.Recoverable(error)) { failures.Add($"{Path.GetFileName(file)}：{error.Message}"); }
+        }
+        bool complete = true;
+        dynamic root = _service.GetFolder(@"\");
+        try { Walk(root); }
+        finally { Marshal.FinalReleaseComObject(root); }
+        return complete;
+
+        // 先匹配实时动作再读取备份。即使厂商重用同名任务，也不会覆盖其新动作。
+        void Check(StartupEntry seed, dynamic task)
+        {
+            string path = task.Path;
+            if (!visited.Add(path)) return;
+            var doc = XDocument.Parse((string)task.Xml);
+            if (!doc.Descendants(Ns + "Command").Any(e => e.Value.Trim('"').Equals(Gate, StringComparison.OrdinalIgnoreCase))) return;
+            var item = ReadTask(seed, task, doc);
+            if (!item.Blocked || item.Fingerprint == null)
+                throw new IOException($"{path} 仍引用启动代理，{item.ReadOnlyReason ?? "任务定义已变化"}。");
+            restore(item);
+        }
+
+        // 不可读的无关目录只阻止代理清理；已知托管任务的读取失败在上一步单独报告。
+        void Walk(dynamic folder)
+        {
+            VisitCollection(() => folder.GetTasks(1), task =>
+            {
+                string path = task.Path;
+                string name = task.Name;
+                Check(new StartupEntry("Task", name, path[..^name.Length]), task);
+            });
+            VisitCollection(() => folder.GetFolders(0), child =>
+            {
+                string path = child.Path;
+                if (!IsProtected(path + "\\")) Walk(child);
+            });
+        }
+
+        // Windows 的 COM 集合从 1 计数，每个对象在访问结束时立即释放。
+        void VisitCollection(Func<dynamic> open, Action<dynamic> visit)
+        {
+            try
+            {
+                dynamic collection = open();
+                try
+                {
+                    int count = collection.Count;
+                    for (int i = 1; i <= count; i++)
+                    {
+                        try
+                        {
+                            dynamic item = collection.Item(i);
+                            try { visit(item); }
+                            finally { Marshal.FinalReleaseComObject(item); }
+                        }
+                        catch (Exception error) when (StartupRuleBatch.Recoverable(error))
+                        {
+                            complete = false;
+                            if (error is IOException or InvalidDataException) failures.Add(error.Message);
+                        }
+                    }
+                }
+                finally { Marshal.FinalReleaseComObject(collection); }
+            }
+            catch (Exception error) when (StartupRuleBatch.Recoverable(error)) { complete = false; }
         }
     }
 
@@ -184,4 +327,11 @@ internal sealed class StartupTaskRules : IDisposable
 
     /// <summary>释放本轮查询使用的计划任务服务连接。</summary>
     public void Dispose() => Marshal.FinalReleaseComObject(_service);
+}
+
+/// <summary>通知界面旧登录用户无法解析，必须取得用户对本次账户修复的明确同意。</summary>
+internal sealed class StartupTriggerRepairRequired(string previous, string current) : IOException("登录触发器中的账户名称已失效。")
+{
+    internal string Previous { get; } = previous;
+    internal string Current { get; } = current;
 }

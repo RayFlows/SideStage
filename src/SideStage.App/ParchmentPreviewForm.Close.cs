@@ -18,6 +18,12 @@ internal sealed partial class ParchmentPreviewForm
     {
         base.OnFormClosing(e);
         if (e.Cancel || e.CloseReason != CloseReason.UserClosing) return;
+        if (_changingStartupItems)
+        {
+            e.Cancel = true;
+            AppendLog("正在处理分身启动项，完成后即可关闭窗口。");
+            return;
+        }
         // 独立更新路径已经等到 ActiveX 断开；绝不能再转入下面的注销确认。
         if (_exitingForUpdate) return;
         if (_preparingUpdate) { e.Cancel = true; return; }

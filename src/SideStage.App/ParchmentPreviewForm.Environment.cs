@@ -19,6 +19,7 @@ internal sealed partial class ParchmentPreviewForm
     private bool _rdpPrepared;
     private bool _enablingChildSessions;
     private Label? _privilegeIcon, _privilegeText;
+    private bool? _administrator;
 
     /// <summary>
     /// 将下次启动的 UAC 请求开关显示在高级设置中。写入失败时读回实际偏好，避免开关显示为已保存。
@@ -68,7 +69,9 @@ internal sealed partial class ParchmentPreviewForm
     /// </summary>
     internal void DisplayPrivilegeCheck(bool? administrator)
     {
+        _administrator = administrator;
         ApplyRecoveryPrivilege(administrator == true);
+        if (_startupPrivilegeWarning != null) _startupPrivilegeWarning.Visible = administrator == false;
         if (_privilegeText is null) return;
         var (level, status, detail) = administrator switch
         {

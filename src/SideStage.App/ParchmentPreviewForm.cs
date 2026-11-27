@@ -106,11 +106,12 @@ internal sealed partial class ParchmentPreviewForm : Form
     internal ParchmentPreviewForm(WindowsChildSessionCredentialStore credentialStore, string? logDirectory = null,
         Action<string>? openFolder = null, bool pollSessions = true, ISessionInspector? sessionInspector = null,
         Func<Task>? enableChildSessions = null, ReleaseUpdateFeed? updateFeed = null, string updatePreferenceKey = UpdatePreferenceKey,
-        bool canReturnToLauncher = false, bool openUpdate = false, Action<WindowsChildSessionCredentials>? requestPreviewConnection = null)
+        bool canReturnToLauncher = false, bool openUpdate = false, Action<WindowsChildSessionCredentials>? requestPreviewConnection = null,
+        StartupInventory? startupInventory = null)
     {
         _updates = updateFeed ?? ReleaseUpdateFeed.FromBuild();
         _updatePreferenceKey = updatePreferenceKey;
-        _startupInventory = new StartupInventory(logDirectory == null
+        _startupInventory = startupInventory ?? new StartupInventory(logDirectory == null
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SideStage", "StartupInventory")
             : Path.Combine(logDirectory, "StartupInventory"));
         _canReturnToLauncher = canReturnToLauncher;
@@ -720,6 +721,7 @@ internal sealed partial class ParchmentPreviewForm : Form
         _editor = null;
         _startupPage?.Dispose();
         _startupPage = null;
+        _startupPrivilegeWarning = null;
         _overview!.Visible = true;
         _drawerTitle!.Text = "高级设置";
         _drawerBack!.Visible = false;

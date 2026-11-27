@@ -23,7 +23,7 @@ internal sealed partial class ParchmentPreviewForm
     private readonly ParentDisconnectWatch _disconnectWatch = new();
     private SettingsSwitch? _recoverParent;
     private PaperInfoButton? _recoveryWarning;
-    private bool _recoveryRequested, _recoveryAllowed;
+    private bool _recoveryRequested;
     private bool _registeredForSessions;
     private int _observedSessionId;
     private CancellationTokenSource? _pendingRecovery;
@@ -37,10 +37,8 @@ internal sealed partial class ParchmentPreviewForm
         heading.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         DrawerMetrics.Margin(heading, 0, SectionGap, 0, 0);
         heading.Controls.Add(SectionHeading("主桌面恢复", compact: true), 0, 0);
-        _recoveryWarning = new PaperInfoButton(_drawerArrowFont, _labelFont, "主桌面恢复权限提示", RecoveryPrivilegeHint)
-        {
-            Text = "\uE7BA", ForeColor = Color.FromArgb(156, 109, 26), Visible = false
-        };
+        _recoveryWarning = PaperInfoButton.PrivilegeWarning(_drawerArrowFont, _labelFont, "主桌面恢复权限提示", RecoveryPrivilegeHint);
+        _recoveryWarning.Visible = false;
         heading.Controls.Add(_recoveryWarning, 1, 0);
         heading.Controls.Add(new PaperInfoButton(_drawerArrowFont, _labelFont, "会话恢复说明", RecoveryNote,
             "查看 Issue #5", OpenRecoveryIssue, RecoveryFooter), 2, 0);
@@ -60,7 +58,6 @@ internal sealed partial class ParchmentPreviewForm
     /// <summary>按当前令牌更新开关与警示。临时限制只影响本次运行，保留用户已保存的偏好。</summary>
     private void ApplyRecoveryPrivilege(bool allowed)
     {
-        _recoveryAllowed = allowed;
         if (_recoverParent == null || _recoveryWarning == null) return;
         _recoverParent.CheckedChanged -= ChangeRecoveryPreference;
         _recoverParent.Enabled = allowed;
@@ -95,7 +92,7 @@ internal sealed partial class ParchmentPreviewForm
     /// <summary>关闭立即取消本次等待，重新开启仅对以后的远程断开生效。</summary>
     private void ChangeRecoveryPreference(object? sender, EventArgs e)
     {
-        if (!_recoveryAllowed) return;
+        if (_administrator != true) return;
         _recoveryRequested = _recoverParent!.Checked;
         CancelParentRecovery();
         try { WriteRecoveryPreference(_updatePreferenceKey, _recoveryRequested); }
@@ -131,7 +128,7 @@ internal sealed partial class ParchmentPreviewForm
                 break;
             case 4: // WTS_REMOTE_DISCONNECT，与锁屏、关闭预览完全不同。
                 var child = _disconnectWatch.TakeDisconnect();
-                if (_recoveryAllowed && _recoverParent?.Checked == true && !_confirmingClose && !_preparingUpdate && child.HasValue)
+                if (_administrator == true && _recoverParent?.Checked == true && !_confirmingClose && !_preparingUpdate && child.HasValue)
                     _ = RecoverParentAsync(child.Value);
                 break;
             case 7: // WTS_SESSION_LOCK，锁屏不能单独触发恢复。

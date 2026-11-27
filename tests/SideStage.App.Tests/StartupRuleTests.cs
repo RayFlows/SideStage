@@ -86,6 +86,52 @@ public sealed class StartupRuleTests
         CollectionAssert.AreEqual(original, File.ReadAllBytes(file));
     }
 
+    /// <summary>用独立登记覆盖重复批量操作、Windows 自行禁用、列表中途失败和厂商覆盖命令。</summary>
+    [TestMethod]
+    public void BulkActionsRespectWindowsAndContinueAfterStaleEntry()
+    {
+        using var run = Registry.CurrentUser.OpenSubKey(Key + @"\Run", true)!;
+        run.SetValue("禁用项", $"\"{Target}\"");
+        using var approval = Registry.CurrentUser.CreateSubKey(Key + @"\Explorer\StartupApproved\Run");
+        approval.SetValue("禁用项", new byte[] { 3, 0, 0, 0 });
+        var close = new StartupRuleBatch(Rules.ReadEntries(), false);
+        Assert.AreEqual(2, close.Candidates.Length);
+        var stale = close.Candidates[0];
+        run.SetValue(stale.Name, $"\"{Target}\" /?");
+        close.Apply(Rules);
+        Assert.AreEqual(1, close.Changed.Count);
+        Assert.AreEqual(1, close.Failures.Count);
+        Assert.AreEqual(1, close.Skipped);
+        var changed = close.Changed.Single();
+        approval.SetValue(changed.Name, new byte[] { 3, 0, 0, 0 });
+        var open = new StartupRuleBatch(Rules.ReadEntries(), true);
+        open.Apply(Rules);
+        Assert.AreEqual(false, open.Changed.Single().WindowsEnabled);
+        Assert.AreEqual(2, open.Skipped);
+        Assert.IsEmpty(new StartupRuleBatch(Rules.ReadEntries(), true).Candidates);
+        Assert.AreEqual($"\"{Target}\" /?", run.GetValue(stale.Name));
+    }
+
+    /// <summary>卸载中模拟一份备份暂时不可用，验证剩余条目继续恢复，补回原备份后可重试。</summary>
+    [TestMethod]
+    public void UninstallCanRetryAfterOneMissingBackup()
+    {
+        var close = new StartupRuleBatch(Rules.ReadEntries(), false);
+        close.Apply(Rules);
+        Assert.AreEqual(2, close.Changed.Count);
+        string backup = Directory.GetFiles(Gate, "*.expand").Single();
+        byte[] original = File.ReadAllBytes(backup);
+        File.Delete(backup);
+        Assert.AreEqual(1, Rules.RestoreAll());
+        Assert.IsTrue(File.ReadAllText(Path.Combine(Gate, "restore-errors.txt")).Contains("配置 A"));
+        Assert.IsTrue(File.Exists(Path.Combine(Gate, "SideStage.StartupGate.exe")));
+        Assert.AreEqual("配置 A", Rules.ReadEntries().Single(item => item.Blocked).Name);
+        File.WriteAllBytes(backup, original);
+        Assert.AreEqual(0, Rules.RestoreAll());
+        Assert.IsFalse(Rules.ReadEntries().Any(item => item.Blocked));
+        Assert.AreEqual(0, Rules.RestoreAll());
+    }
+
     /// <summary>系统程序、系统已禁用入口以及已发生变化的旧快照都无法替换 Windows 的现有登记。</summary>
     [TestMethod]
     public void RejectsProtectedDisabledAndStaleEntries()
@@ -149,6 +195,109 @@ public sealed class StartupRuleTests
         Assert.AreEqual(false, tasks.Describe(seed, doc, false).WindowsEnabled);
     }
 
+    /// <summary>相同的运行账户可以出现在不同权限的任务上，管理员组的允许项不能冒充普通用户的写入权。</summary>
+    [TestMethod]
+    public void ChecksEffectiveTaskWritePermission()
+    {
+        using var user = WindowsIdentity.GetCurrent();
+        string sid = user.User!.Value;
+        string administratorOwned = $"O:BAG:BAD:(A;;FA;;;BA)(A;;FA;;;SY)(A;;FR;;;{sid})";
+        string userWritable = $"O:{sid}G:BAD:(A;;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;{sid})";
+        Assert.IsFalse(StartupTaskAccess.CanWrite(administratorOwned));
+        Assert.IsTrue(StartupTaskAccess.CanWrite(userWritable));
+    }
+
+    /// <summary>在已授权的验收进程中创建独立的只读个人任务，验证管理员托管、普通用户读取和原权限恢复。</summary>
+    [TestMethod]
+    public void AdminOwnedPersonalTaskUsesProtectedBackup()
+    {
+        if (!StartupElevation.IsAdministrator())
+        {
+            // 普通进程也验证它不能通过伪造缓存标志进入管理员操作。
+            var fake = new StartupEntry("Task", "SideStage-Test-" + _id, @"\", RequiresAdmin: true);
+            Assert.ThrowsExactly<UnauthorizedAccessException>(() => new StartupRegistrations().SetAllowed(fake, false));
+            return;
+        }
+        using var identity = WindowsIdentity.GetCurrent();
+        string sid = identity.User!.Value, name = "SideStage-Test-" + _id;
+        string acl = $"O:BAG:BAD:P(A;;FA;;;BA)(A;;FA;;;SY)(A;;FR;;;{sid})";
+        string xml = $"""
+            <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+              <Triggers><LogonTrigger><UserId>{sid}</UserId></LogonTrigger></Triggers>
+              <Principals><Principal id="User"><UserId>{sid}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+              <Actions Context="User"><Exec><Command>{System.Security.SecurityElement.Escape(Target)}</Command></Exec></Actions>
+            </Task>
+            """;
+        dynamic service = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service", true)!)!;
+        try
+        {
+            service.Connect();
+            dynamic folder = service.GetFolder(@"\");
+            try
+            {
+                object created = folder.RegisterTask(name, xml, 2 | 16, sid, null, 3, acl);
+                Marshal.FinalReleaseComObject(created);
+                try
+                {
+                    var seed = new StartupEntry("Task", name, @"\");
+                    using var ordinary = new StartupTaskRules(StartupRegistrations.DefaultGateDirectory);
+                    using var admin = new StartupTaskRules(ProtectedStartupStore.Location, protectedStore: true);
+                    Assert.IsTrue(ordinary.Inspect(seed).RequiresAdmin);
+                    var initial = admin.Inspect(seed);
+                    Assert.IsNull(initial.ReadOnlyReason);
+                    var registrations = new StartupRegistrations();
+                    var blocked = registrations.SetAllowed(initial, false);
+                    Assert.IsTrue(blocked.Blocked);
+                    Assert.IsTrue(StartupUserAccess.AsUser(() =>
+                    {
+                        ProtectedStartupStore.Validate(false);
+                        using var view = new StartupTaskRules(ProtectedStartupStore.Location, protectedStore: true);
+                        var readOnly = view.Inspect(seed);
+                        return readOnly.Blocked && readOnly.Fingerprint == null;
+                    }));
+                    var restored = registrations.SetAllowed(blocked, true);
+                    Assert.AreEqual(initial.Fingerprint, restored.Fingerprint);
+                    dynamic live = folder.GetTask(name);
+                    try { Assert.IsFalse(StartupTaskAccess.CanWrite((string)live.GetSecurityDescriptor(7))); }
+                    finally { Marshal.FinalReleaseComObject(live); }
+                }
+                finally { folder.DeleteTask(name, 0); }
+            }
+            finally { Marshal.FinalReleaseComObject(folder); }
+        }
+        finally { Marshal.FinalReleaseComObject(service); }
+    }
+
+    /// <summary>复现无效登录名的任务定义，拒绝未确认或过期确认；同意后只有触发器的账户变为当前 SID。</summary>
+    [TestMethod]
+    public void RepairsOnlyTheConfirmedUnmappedTrigger()
+    {
+        using var user = WindowsIdentity.GetCurrent();
+        string[] account = user.Name.Split('\\');
+        if (account.Length != 2 || !account[0].Equals(Environment.MachineName, StringComparison.OrdinalIgnoreCase))
+            Assert.Inconclusive("此用例需要本机账户。");
+        string oldName = "OLD-" + _id[..8] + "\\" + account[1];
+        XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+        var definition = new XDocument(new XElement(ns + "Task", new XElement(ns + "Triggers",
+            new XElement(ns + "LogonTrigger", new XElement(ns + "UserId", oldName), new XElement(ns + "Delay", "PT1M")))));
+        var original = new XDocument(definition);
+        using var tasks = new StartupTaskRules(Gate);
+        Assert.ThrowsExactly<StartupTriggerRepairRequired>(() => tasks.ApplyTriggerRepair(definition, null));
+        Assert.ThrowsExactly<StartupTriggerRepairRequired>(() => tasks.ApplyTriggerRepair(definition, user.Name));
+        Assert.IsTrue(XNode.DeepEquals(original, definition));
+        original.Descendants(ns + "UserId").Single().Value = user.User!.Value;
+        tasks.ApplyTriggerRepair(definition, oldName);
+        Assert.IsTrue(XNode.DeepEquals(original, definition));
+        tasks.ApplyTriggerRepair(definition, null);
+        Assert.IsTrue(XNode.DeepEquals(original, definition));
+        // 与当前登录名完全不同的失效引用同样需要用户明确选择，不能按应用名或用户名自动认领。
+        string different = "OLD-" + _id[..8] + "\\retired-user";
+        definition.Descendants(ns + "UserId").Single().Value = different;
+        Assert.ThrowsExactly<StartupTriggerRepairRequired>(() => tasks.ApplyTriggerRepair(definition, oldName));
+        tasks.ApplyTriggerRepair(definition, different);
+        Assert.IsTrue(XNode.DeepEquals(original, definition));
+    }
+
     /// <summary>在当前账户创建独立的普通登录任务，验证计划程序接受动作替换、放行及原样恢复。</summary>
     [TestMethod]
     public void PersonalTaskRoundTripsWithoutChangingTriggers()
@@ -188,7 +337,8 @@ public sealed class StartupRuleTests
                     Assert.IsTrue(File.Exists(Output));
                     if (int.TryParse(Environment.GetEnvironmentVariable("SIDESTAGE_TEST_EXISTING_CHILD"), out int expected))
                         CheckExistingChild(folder, name, expected);
-                    Assert.AreEqual(0, Rules.RestoreAll());
+                    var restore = Rules.RestoreAll();
+                    Assert.AreEqual(0, restore, restore == 0 ? "" : File.ReadAllText(Path.Combine(Gate, "restore-errors.txt")));
                     Assert.AreEqual(initial.Fingerprint, tasks.Inspect(initial).Fingerprint);
                     // Windows 系统目录以及提权的任务在相同动作下仍须保持只读。
                     doc.Descendants(ns + "RunLevel").Single().Value = "HighestAvailable";

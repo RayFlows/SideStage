@@ -19,6 +19,8 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args is ["--startup-uninstall-fixture", var action, var key, ..] && Guid.TryParseExact(key, "D", out var fixtureKey))
+            return StartupUninstallFixture.Run(action, fixtureKey);
         // 自动验收必须让窗口回调异常直接导致进程失败，不能由系统的「继续」对话框掩盖。
         bool captionButtons = args is ["--caption-buttons"];
         if (captionButtons || args is ["--check-update-entries"])
@@ -27,6 +29,8 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         if (args is ["--privilege-drawer"]) return SettingsInteractionCheck.CheckPrivilegeAndConnect();
+        if (args is ["--startup-toggle", var fixture] && Guid.TryParseExact(fixture, "N", out var fixtureId))
+            return StartupInventoryCheck.CheckToggle(fixtureId);
         if (args.FirstOrDefault() == "--startup-inventory") return StartupInventoryCheck.Run(args.ElementAtOrDefault(1));
         if (args is ["--update-window", var image]) return UpdateWindowCheck.Run(image);
         if (args is ["--preview-update"]) return UpdateWindowCheck.Preview();

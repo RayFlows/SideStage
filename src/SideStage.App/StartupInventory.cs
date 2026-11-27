@@ -18,20 +18,22 @@ internal enum StartupRepeatPolicy { Unknown, IgnoreNew, Parallel, Queue, StopExi
 /// <summary>一条登录登记的扫描结果。WindowsEnabled 表示系统登记状态，Blocked 表示分身规则。</summary>
 internal sealed record StartupEntry(string Source, string Name, string Detail, string? IconPath = null,
     string? Fingerprint = null, string? ReadOnlyReason = null, bool Blocked = false, string? DisplayName = null,
-    bool? WindowsEnabled = null, StartupRepeatPolicy RepeatPolicy = StartupRepeatPolicy.Unknown);
+    bool? WindowsEnabled = null, StartupRepeatPolicy RepeatPolicy = StartupRepeatPolicy.Unknown, bool RequiresAdmin = false);
 
 /// <summary>打包保存普通登记及按应用包版本索引的声明，包括没有声明的包。</summary>
 internal sealed record StartupSnapshot(int Schema, DateTimeOffset Completed, StartupEntry[] Entries, Dictionary<string, StartupEntry[]> Packages)
 {
+    internal bool MatchesProcess => Elevated == StartupElevation.IsAdministrator();
+    public bool Elevated { get; init; } = StartupElevation.IsAdministrator();
     internal IEnumerable<StartupEntry> Items => Entries.Concat(Packages.Values.SelectMany(items => items));
 }
 
 /// <summary>只读取写当前用户的快照与扫描偏好，可为验收指定隔离目录。</summary>
-internal sealed class StartupInventory(string directory)
+internal sealed class StartupInventory(string directory, StartupRegistrations? registrations = null)
 {
-    // 旧快照未核对应用包的用户开关。升级后首次打开时重新读取 Windows 登记。
-    private const int Schema = 4;
-    internal StartupRegistrations Registrations { get; } = new();
+    // 旧快照未核对任务写入权限。升级后首次打开时按当前普通账户重新分组。
+    internal const int Schema = 6;
+    internal StartupRegistrations Registrations { get; } = registrations ?? new();
     internal sealed record ScanOutput(StartupEntry[] Entries, Dictionary<string, StartupEntry[]> Packages);
 
     /// <summary>加载开关和方式。没有偏好或文件已损坏时使用首次安装的默认值。</summary>
@@ -44,7 +46,7 @@ internal sealed class StartupInventory(string directory)
     internal StartupSnapshot? Cached()
     {
         var cached = Read<StartupSnapshot>("inventory.json");
-        return cached is { Schema: Schema, Entries: not null, Packages: not null }
+        return cached is { Schema: Schema, Entries: not null, Packages: not null, MatchesProcess: true }
             && cached.Entries.All(Valid) && cached.Packages.Values.All(items => items != null && items.All(Valid)) ? cached : null;
     }
 
@@ -76,11 +78,16 @@ internal sealed class StartupInventory(string directory)
             if (process.ExitCode != 0) throw new IOException("Windows 未能读取完整的启动项列表。");
             var scan = JsonSerializer.Deserialize<ScanOutput>(await output) ?? throw new InvalidDataException("扫描结果为空。");
             // 本地登记与开关共用同一读取器，显示状态以 Windows 正在使用的入口为准。
-            using var tasks = new StartupTaskRules(StartupRegistrations.DefaultGateDirectory);
+            using var tasks = new StartupTaskRules(Registrations.GateDirectory);
+            using var protectedTasks = new StartupTaskRules(ProtectedStartupStore.Location, protectedStore: true);
             if (scan.Entries == null || scan.Packages == null || !scan.Entries.All(Valid)
                 || !scan.Packages.Values.All(items => items != null && items.All(Valid)))
                 throw new InvalidDataException("Windows 返回的启动项列表不完整。");
-            var entries = Registrations.ReadEntries().Concat(scan.Entries.Select(tasks.Inspect)).ToArray();
+            var entries = Registrations.ReadEntries().Concat(scan.Entries.Select(seed =>
+            {
+                var entry = tasks.Inspect(seed);
+                return Registrations.SupportsProtectedTasks && entry.RequiresAdmin ? protectedTasks.Inspect(seed) : entry;
+            })).ToArray();
             var snapshot = new StartupSnapshot(Schema, DateTimeOffset.Now, entries, scan.Packages);
             token.ThrowIfCancellationRequested();
             Write("inventory.json", snapshot);
@@ -95,9 +102,14 @@ internal sealed class StartupInventory(string directory)
 
     /// <summary>只更新被用户修改的那一行，保留扫描时间与其他缓存，浏览页面无需重新枚举。</summary>
     internal StartupSnapshot Remember(StartupSnapshot snapshot, StartupEntry changed)
+        => Remember(snapshot, new[] { changed });
+
+    /// <summary>批量完成后只替换一次缓存，保留原清单顺序及没有成功改动的登记。</summary>
+    internal StartupSnapshot Remember(StartupSnapshot snapshot, IEnumerable<StartupEntry> changed)
     {
+        var byLocation = changed.ToDictionary(item => (item.Source, item.Detail, item.Name));
         var result = snapshot with { Entries = snapshot.Entries.Select(entry =>
-            entry.Source == changed.Source && entry.Name == changed.Name && entry.Detail == changed.Detail ? changed : entry).ToArray() };
+            byLocation.GetValueOrDefault((entry.Source, entry.Detail, entry.Name), entry)).ToArray() };
         Write("inventory.json", result);
         return result;
     }

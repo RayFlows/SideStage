@@ -18,6 +18,8 @@ internal sealed class StartupRegistrations
     private readonly string _gateDirectory;
     private readonly string _personalFolder;
     private readonly string _commonFolder;
+    internal string GateDirectory => _gateDirectory;
+    internal bool SupportsProtectedTasks { get; }
     internal static string DefaultGateDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SideStage", "StartupGate");
     private string Gate => Path.Combine(_gateDirectory, "SideStage.StartupGate.exe");
     private static readonly string WindowsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
@@ -28,6 +30,7 @@ internal sealed class StartupRegistrations
     internal StartupRegistrations(string? versionKey = null, string? gateDirectory = null, string? personalFolder = null, string? commonFolder = null)
     {
         _versionKey = versionKey ?? @"Software\Microsoft\Windows\CurrentVersion";
+        SupportsProtectedTasks = versionKey == null && gateDirectory == null && personalFolder == null && commonFolder == null;
         _gateDirectory = gateDirectory ?? DefaultGateDirectory;
         _personalFolder = personalFolder ?? Environment.GetFolderPath(Environment.SpecialFolder.Startup);
         _commonFolder = commonFolder ?? Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup);
@@ -107,7 +110,7 @@ internal sealed class StartupRegistrations
             string? id = link.Target.Equals(Gate, StringComparison.OrdinalIgnoreCase) && Guid.TryParseExact(link.Arguments, "N", out var value)
                 ? value.ToString("N") : null;
             string original = id == null ? path : Stem(id) + ".lnk";
-            if (!File.Exists(original)) return row with { ReadOnlyReason = "原始快捷方式备份缺失" };
+            if (!File.Exists(original)) return row with { Blocked = id != null, ReadOnlyReason = "原始快捷方式备份缺失" };
             if (id != null) link = ReadLink(original);
             string? reason = TargetReason(link.Target, Dispatcher.LocalPath(link.Target) && link.Target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
             reason ??= source == "CommonStartup" ? "全机共享登记" : ApprovalReason(row.WindowsEnabled);
@@ -154,13 +157,20 @@ internal sealed class StartupRegistrations
     };
 
     /// <summary>在单次变更期间互斥，重新读取真实登记。两个窗口、过期扫描或应用修改都不能覆盖新命令。</summary>
-    internal StartupEntry SetAllowed(StartupEntry snapshot, bool allowed) =>
-        StartupUserAccess.AsUser(() => ChangeRegistration(snapshot, allowed));
+    internal StartupEntry SetAllowed(StartupEntry snapshot, bool allowed, string? confirmedTriggerUser = null)
+    {
+        if (!snapshot.RequiresAdmin)
+            return StartupUserAccess.AsUser(() => ChangeRegistration(snapshot, allowed, confirmedTriggerUser));
+        if (!SupportsProtectedTasks || snapshot.Source != "Task" || !StartupElevation.IsAdministrator())
+            throw new UnauthorizedAccessException("需要管理员权限修改此个人任务。");
+        return ChangeRegistration(snapshot, allowed, confirmedTriggerUser);
+    }
 
     /// <summary>在普通用户令牌下先核验文件和登记，再提交一项可恢复的变更。</summary>
-    private StartupEntry ChangeRegistration(StartupEntry snapshot, bool allowed)
+    private StartupEntry ChangeRegistration(StartupEntry snapshot, bool allowed, string? confirmedTriggerUser)
     {
-        using var mutex = new Mutex(false, @"Global\SideStage.StartupRules." + Hash(_gateDirectory));
+        string directory = snapshot.RequiresAdmin ? ProtectedStartupStore.Location : _gateDirectory;
+        using var mutex = new Mutex(false, @"Global\SideStage.StartupRules." + Hash(directory));
         bool owned;
         try { owned = mutex.WaitOne(1500); }
         catch (AbandonedMutexException) { owned = true; }
@@ -169,8 +179,12 @@ internal sealed class StartupRegistrations
         {
             if (snapshot.Source == "Task")
             {
-                using var tasks = new StartupTaskRules(_gateDirectory);
-                return tasks.Change(snapshot, allowed, PrepareGate);
+                using var tasks = new StartupTaskRules(directory, snapshot.RequiresAdmin);
+                return tasks.Change(snapshot, allowed, () =>
+                {
+                    if (snapshot.RequiresAdmin) ProtectedStartupStore.Validate(true);
+                    return PrepareGate(directory);
+                }, confirmedTriggerUser);
             }
             if (snapshot.Source == "CurrentUser" && snapshot.Detail == "Run (Registry64)")
             {
@@ -184,17 +198,21 @@ internal sealed class StartupRegistrations
                     string id = GateId(raw)!;
                     string original = BackupCommand(id, out var type) ?? throw Stale();
                     key.SetValue(snapshot.Name, original, type);
+                    if (key.GetValueKind(snapshot.Name) != type ||
+                        key.GetValue(snapshot.Name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string != original)
+                        throw new IOException("未能核实恢复后的启动命令，已保留备份。");
                     Retire(Stem(id) + (type == RegistryValueKind.ExpandString ? ".expand" : ".run"));
                 }
                 else
                 {
-                    string id = PrepareGate();
+                    string id = PrepareGate(_gateDirectory);
                     string wrapper = $"\"{Gate}\" {id}";
                     if (wrapper.Length > 260) throw new IOException("登录入口路径超过 Windows Run 长度限制。");
                     var extension = key.GetValueKind(snapshot.Name) == RegistryValueKind.ExpandString ? ".expand" : ".run";
                     WriteNew(Stem(id) + extension, Encoding.UTF8.GetBytes(raw));
                     Verify(snapshot, Current(), allowed);
                     key.SetValue(snapshot.Name, wrapper, RegistryValueKind.String);
+                    if (key.GetValue(snapshot.Name) as string != wrapper) throw Stale();
                 }
                 return Current() ?? throw Stale();
             }
@@ -213,14 +231,20 @@ internal sealed class StartupRegistrations
                 }
                 else
                 {
-                    string id = PrepareGate();
+                    string id = PrepareGate(_gateDirectory);
                     File.Copy(path, Stem(id) + ".lnk");
                     CreateLink(staged, Gate, id);
                 }
                 Verify(snapshot, ReadFolder("Startup", path), allowed);
                 // 在目标卷上原子替换；若个人启动目录重定向到其他卷，保留原件并报告失败。
                 File.Replace(staged, path, null);
-                if (backup != null) Retire(backup);
+                if (backup != null)
+                {
+                    if (!File.ReadAllBytes(path).AsSpan().SequenceEqual(File.ReadAllBytes(backup)))
+                        throw new IOException("未能核实恢复后的快捷方式，已保留备份。");
+                    Retire(backup);
+                }
+                else if (!ReadFolder("Startup", path).Blocked) throw Stale();
             }
             finally { File.Delete(staged); }
             return ReadFolder("Startup", path);
@@ -235,36 +259,97 @@ internal sealed class StartupRegistrations
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
-    /// <summary>卸载前只还原仍然指向本代理的个人登记。应用自行修改或移除的入口保持现状。</summary>
+    /// <summary>卸载前逐项回读和恢复。故障清单落入普通用户目录，重试时从实时登记重新开始。</summary>
     internal int RestoreAll()
     {
-        if (!Directory.Exists(_gateDirectory)) return 0;
+        var failures = new List<string>();
+        StartupUserAccess.AsUser(() => { RestoreDirectory(_gateDirectory, false, failures); return 0; });
+        if (SupportsProtectedTasks) RestoreDirectory(ProtectedStartupStore.Location, true, failures);
+        return StartupUserAccess.AsUser(() =>
+        {
+            string report = Path.Combine(_gateDirectory, "restore-errors.txt");
+            if (failures.Count == 0) { if (File.Exists(report)) Retire(report); return 0; }
+            try { Directory.CreateDirectory(_gateDirectory); File.WriteAllLines(report, failures); }
+            catch (Exception error) when (StartupRuleBatch.Recoverable(error)) { }
+            return 1;
+        });
+    }
+
+    /// <summary>锁住同一目录直至最后一次检查。无法完整核实引用时保留独立代理和孤立备份。</summary>
+    private void RestoreDirectory(string directory, bool protectedStore, List<string> failures)
+    {
         try
         {
-            using var tasks = new StartupTaskRules(_gateDirectory);
-            var items = ReadEntries().Where(item => item.Blocked).Concat(tasks.Managed()).ToArray();
-            foreach (var item in items) SetAllowed(item, true);
-            return 0;
+            bool hasDirectory = true;
+            try { _ = File.GetAttributes(directory); }
+            catch (Exception ex) when (ex is DirectoryNotFoundException or FileNotFoundException) { hasDirectory = false; }
+            if (protectedStore && hasDirectory) ProtectedStartupStore.Validate(false);
+            using var mutex = new Mutex(false, @"Global\SideStage.StartupRules." + Hash(directory));
+            try { if (!mutex.WaitOne(1500)) throw new IOException("其他窗口正在修改启动项。"); }
+            catch (AbandonedMutexException) { }
+            try
+            {
+                int before = failures.Count;
+                bool complete = true;
+                if (!protectedStore)
+                {
+                    // 直接检查当前用户的真实入口，不遍历全机登记，也不使用展示缓存。
+                    using var root = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64);
+                    using var run = root.OpenSubKey(_versionKey + @"\Run");
+                    if (run != null)
+                        foreach (var name in run.GetValueNames())
+                            TryRestore(name, () => ReadRun(root, run, RegistryHive.CurrentUser, RegistryView.Registry64, "Run", name));
+                    if (Directory.Exists(_personalFolder))
+                        foreach (var path in Directory.GetFiles(_personalFolder, "*.lnk"))
+                            TryRestore(Path.GetFileName(path), () => ReadFolder("Startup", path));
+                }
+                using var tasks = new StartupTaskRules(directory, protectedStore);
+                complete &= tasks.RestoreManaged(item => SetAllowed(item, true), failures);
+                // 只有经核对的空目录才退役代理；厂商替换登记后留下的孤立备份可用于人工找回。
+                if (hasDirectory && complete && failures.Count == before &&
+                    !Directory.EnumerateFiles(directory).Any(file => Path.GetFileName(file) is not ("SideStage.StartupGate.exe" or "restore-errors.txt")))
+                {
+                    string gate = Path.Combine(directory, "SideStage.StartupGate.exe");
+                    if (protectedStore && File.Exists(gate) && !StartupElevation.IsAdministrator())
+                        throw new UnauthorizedAccessException("清理受保护的启动代理需要管理员权限。");
+                    Retire(gate);
+                    Retire(Path.Combine(directory, "restore-errors.txt"));
+                    if (!Directory.EnumerateFileSystemEntries(directory).Any()) Directory.Delete(directory);
+                }
+
+                // 一个备份缺失只影响对应条目，其余登记继续恢复。
+                void TryRestore(string name, Func<StartupEntry?> read)
+                {
+                    try
+                    {
+                        var item = read();
+                        if (item?.Blocked == true) SetAllowed(item, true);
+                        if (item?.ReadOnlyReason == "无法读取快捷方式") complete = false;
+                    }
+                    catch (Exception error) when (StartupRuleBatch.Recoverable(error)) { failures.Add($"{name}：{error.Message}"); }
+                }
+            }
+            finally { mutex.ReleaseMutex(); }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or COMException
-            or System.ComponentModel.Win32Exception) { return 1; }
+        catch (Exception error) when (StartupRuleBatch.Recoverable(error)) { failures.Add($"{directory}：{error.Message}"); }
     }
 
     /// <summary>安装独立的用户态代理。已存在文件必须与内嵌构建逐字节一致。</summary>
-    private string PrepareGate()
+    private static string PrepareGate(string directory)
     {
-        Directory.CreateDirectory(_gateDirectory);
+        Directory.CreateDirectory(directory);
+        string gate = Path.Combine(directory, "SideStage.StartupGate.exe");
         using var embedded = typeof(StartupRegistrations).Assembly.GetManifestResourceStream("SideStage.StartupGate.exe")!;
         using var buffer = new MemoryStream();
         embedded.CopyTo(buffer);
         byte[] bytes = buffer.ToArray();
-        if (!File.Exists(Gate) || !File.ReadAllBytes(Gate).AsSpan().SequenceEqual(bytes))
+        if (!File.Exists(gate) || !File.ReadAllBytes(gate).AsSpan().SequenceEqual(bytes))
         {
-            string temp = Stem(Guid.NewGuid().ToString("N")) + ".tmp";
-            try { WriteNew(temp, bytes); File.Move(temp, Gate, overwrite: true); }
+            string temp = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".tmp");
+            try { WriteNew(temp, bytes); File.Move(temp, gate, overwrite: true); }
             finally { File.Delete(temp); }
         }
-        if (!File.ReadAllBytes(Gate).AsSpan().SequenceEqual(bytes)) throw new IOException("启动代理版本或文件内容不匹配。");
+        if (!File.ReadAllBytes(gate).AsSpan().SequenceEqual(bytes)) throw new IOException("启动代理版本或文件内容不匹配。");
         return Guid.NewGuid().ToString("N");
     }
 

@@ -18,6 +18,8 @@ internal sealed class StartupAppRow : CheckBox
     private readonly string _description;
     private string _wrappedTitle = "";
     private string _wrappedDetail = "";
+    private int _measuredWidth, _measuredDpi, _measuredHeight;
+    private Font? _measuredFont;
     private readonly bool _editable;
     private const TextFormatFlags Wrap = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
 
@@ -36,15 +38,13 @@ internal sealed class StartupAppRow : CheckBox
         AccessibleDescription = $"{_description}\n{appBehavior}";
         AccessibleRole = _editable ? AccessibleRole.CheckButton : AccessibleRole.StaticText;
         AutoCheck = false;
-        AutoSize = false;
+        AutoSize = true;
         TabStop = _editable;
         Cursor = _editable ? Cursors.Hand : Cursors.Default;
         Checked = !item.Blocked;
         DoubleBuffered = true;
         ResizeRedraw = true;
         if (_editable) Click += (_, _) => clicked(this);
-        SizeChanged += (_, _) => MeasureHeight();
-        DrawerMetrics.Bind(this, MeasureHeight);
     }
 
     /// <summary>逐行显示系统登记状态、操作限制和同一任务的重复触发策略。分身开关独立于 Windows 状态。</summary>
@@ -84,16 +84,29 @@ internal sealed class StartupAppRow : CheckBox
         return new(area.Left + indent, 0, Math.Max(1, area.Width - indent - (_editable ? LogicalToDeviceUnits(44) : 0)), Height);
     }
 
-    /// <summary>按最终列宽测量两行的真实高度，跨屏和字体变化时保持所有字可读。</summary>
-    private void MeasureHeight()
+    /// <summary>由表格在分配行空间前按列宽询问首选高度，避免用临时窄列的高度留出多余空白。</summary>
+    public override Size GetPreferredSize(Size proposedSize)
     {
-        if (Width < LogicalToDeviceUnits(120)) return;
-        var limit = new Size(TextArea().Width, int.MaxValue);
+        if (_caption == null) return base.GetPreferredSize(proposedSize);
+        int width = proposedSize.Width is > 1 and < int.MaxValue ? proposedSize.Width : Math.Max(Width, LogicalToDeviceUnits(120));
+        int inset = 2 * LogicalToDeviceUnits(PaperFieldSurface.TextInset) + LogicalToDeviceUnits(36)
+            + (_editable ? LogicalToDeviceUnits(44) : 0);
+        return new Size(width, MeasureTextHeight(Math.Max(1, width - inset)));
+    }
+
+    /// <summary>布局与绘制共享当前文字列的测量，不在尺寸回调中改写控件高度。</summary>
+    private int MeasureTextHeight(int width)
+    {
+        if (width == _measuredWidth && _measuredDpi == DeviceDpi && _measuredFont == Font) return _measuredHeight;
+        var limit = new Size(width, int.MaxValue);
         _wrappedTitle = WrapIdentifiers(Text, Font, limit.Width);
         _wrappedDetail = string.Join('\n', _description.Split('\n').Select(line => WrapIdentifiers(line, _caption, limit.Width)));
         int height = TextRenderer.MeasureText(_wrappedTitle, Font, limit, Wrap).Height
             + TextRenderer.MeasureText(_wrappedDetail, _caption, limit, Wrap).Height + LogicalToDeviceUnits(15);
-        Height = Math.Max(LogicalToDeviceUnits(50), height);
+        _measuredWidth = width;
+        _measuredDpi = DeviceDpi;
+        _measuredFont = Font;
+        return _measuredHeight = Math.Max(LogicalToDeviceUnits(50), height);
     }
 
     /// <summary>原生换行不会拆开超长产品名和账户编号。仅对超过整列宽度的单词按文字元素拆行。</summary>
@@ -126,6 +139,7 @@ internal sealed class StartupAppRow : CheckBox
         var surface = e.Graphics;
         PaperFieldSurface.Paint(surface, this, _editable ? PaperFieldSurface.RowColor(this, Focused && ShowFocusCues) : PaperFieldSurface.Paper);
         Rectangle body = PaperFieldSurface.Content(this), area = TextArea();
+        MeasureTextHeight(area.Width);
         int icon = LogicalToDeviceUnits(26);
         surface.InterpolationMode = InterpolationMode.HighQualityBicubic;
         surface.DrawImage(_icon, new Rectangle(body.Left, (Height - icon) / 2, icon, icon));
