@@ -14,6 +14,42 @@ namespace SideStage.App.FrameCheck;
 
 internal static class SettingsInteractionCheck
 {
+    /// <summary>从高级设置修改画面与声音，原窗口仍打开时再创建两个入口，验证偏好已保存并用于实际预览。</summary>
+    internal static int CheckPreviewPreferences()
+    {
+        string id = Guid.NewGuid().ToString("N");
+        string key = $@"Software\SideStage.FrameCheck\{id}";
+        string directory = Path.Combine(Path.GetTempPath(), "SideStage.FrameCheck", id);
+        var vault = new WindowsChildSessionCredentialStore($"SideStage.FrameCheck.{id}");
+        var sessions = new Program.FirstUseSessions();
+        try
+        {
+            using var original = new ParchmentPreviewForm(vault, directory, pollSessions: false, sessionInspector: sessions, updatePreferenceKey: key);
+            var controls = Descendants(original).ToArray();
+            var resolution = controls.OfType<ComboBox>().Single(c => c.AccessibleName == "远端分辨率");
+            resolution.SelectedIndex = resolution.Items.Count - 1;
+            var scaling = controls.OfType<ComboBox>().Single(c => c.AccessibleName == "画面缩放");
+            scaling.SelectedIndex = 1 - scaling.SelectedIndex;
+            controls.OfType<CheckBox>().Single(c => c.Text == "保持宽高比").Checked = false;
+            controls.OfType<CheckBox>().Single(c => c.Text == "静音子会话").Checked = false;
+
+            using var reopened = new ParchmentPreviewForm(vault, directory, pollSessions: false, sessionInspector: sessions, updatePreferenceKey: key);
+            using var classic = new ClassicPreviewForm(key);
+            foreach (Form window in new Form[] { reopened, classic })
+            {
+                var panel = Descendants(window).OfType<ChildSessionPreviewPanel>().Single();
+                Require(panel.PreviewControl.AudioMode == ChildSessionAudioMode.RedirectToThisComputer, "重开后仍向本机播放声音");
+                Require(panel.Settings.ScalingMode == PreviewScalingMode.OneToOne && !panel.Settings.PreserveAspectRatio, "重开后保留缩放和比例选择");
+                Require(panel.Settings.Resolution == new RemoteDesktopResolution(1920, 1080), "恢复自定义的远端分辨率");
+            }
+            var restored = Descendants(reopened).OfType<ComboBox>().Single(c => c.AccessibleName == "远端分辨率");
+            Require(restored.SelectedIndex == restored.Items.Count - 1, "尺寸与预设相同时仍恢复自定义输入");
+            Console.WriteLine("画面和声音设置跨窗口恢复通过。");
+            return 0;
+        }
+        finally { Registry.CurrentUser.DeleteSubKey(key, false); }
+    }
+
     /// <summary>
     /// 用单独的注册表键和凭据项检查管理员开关，再从同一真实窗口分别提交首次输入和已保存凭据。
     /// 用记录侧栏可见性的回调代替 RDP 调用，以便在请求发出的当下验收界面，无需实际登录。

@@ -45,7 +45,8 @@ internal sealed class ClassicPreviewForm : Form
     private readonly WindowsSessionInspector _sessionInspector = new();
     private readonly WindowsChildSessionTerminator _sessionTerminator = new();
     private readonly WindowsChildSessionCredentialStore _credentialStore = new();
-    private readonly ChildSessionPreviewPanel _previewPanel = new();
+    private readonly PreviewPreferences _previewPreferences;
+    private readonly ChildSessionPreviewPanel _previewPanel;
     private readonly ThemedButton _connectButton = new();
     private readonly ThemedButton _credentialButton = new();
     private readonly ThemedButton _disconnectButton = new();
@@ -78,8 +79,10 @@ internal sealed class ClassicPreviewForm : Form
     /// <summary>
     /// 建立预览控件、操作按钮、状态区域和只读轮询。
     /// </summary>
-    public ClassicPreviewForm()
+    public ClassicPreviewForm(string preferenceKey = StartupElevation.SettingsKey)
     {
+        _previewPreferences = new(preferenceKey);
+        _previewPanel = new(_previewPreferences.Display, _previewPreferences.Audio);
         Program.ApplyIdentity(this);
         BackColor = WindowColor;
         ForeColor = TextColor;
@@ -243,7 +246,7 @@ internal sealed class ClassicPreviewForm : Form
         _muteChildAudioToggle.AutoSize = false;
         _muteChildAudioToggle.Size = new Size(110, 36);
         _muteChildAudioToggle.Text = "静音子会话";
-        _muteChildAudioToggle.Checked = true;
+        _muteChildAudioToggle.Checked = _previewPreferences.Audio == ChildSessionAudioMode.DoNotPlay;
         _muteChildAudioToggle.FlatStyle = FlatStyle.Flat;
         _muteChildAudioToggle.BackColor = WindowColor;
         _muteChildAudioToggle.ForeColor = TextColor;
@@ -280,6 +283,7 @@ internal sealed class ClassicPreviewForm : Form
         {
             _muteChildAudioToggle.Enabled = false;
             _audioReconnect.Change(_previewPanel.PreviewControl, audioMode);
+            if (!_previewPreferences.SaveAudio(audioMode)) AppendLog("声音设置已应用，但保存失败。");
 
             string modeMessage = _muteChildAudioToggle.Checked
                 ? "子会话声音已设为关闭"
@@ -465,7 +469,7 @@ internal sealed class ClassicPreviewForm : Form
         sidebar.Controls.Add(_scalingModeSelector);
         sidebar.Controls.Add(_preserveAspectRatioToggle);
         sidebar.Controls.Add(_displaySettingsHelp);
-        SynchronizeDisplaySettingsControls(_previewPanel.Settings);
+        SynchronizeDisplaySettingsControls(_previewPanel.Settings, _previewPreferences.CustomResolution);
         return sidebar;
     }
 
@@ -510,6 +514,8 @@ internal sealed class ClassicPreviewForm : Form
                 scalingOption.Mode,
                 _preserveAspectRatioToggle.Checked);
             _previewPanel.SetSettings(settings);
+            if (!_previewPreferences.SaveDisplay(settings, resolutionOption.Resolution is null))
+                AppendLog("画面设置已应用，但保存失败。");
             SynchronizeDisplaySettingsControls(
                 settings,
                 keepCustomResolution: resolutionOption.Resolution is null);

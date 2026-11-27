@@ -29,6 +29,7 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         if (args is ["--privilege-drawer"]) return SettingsInteractionCheck.CheckPrivilegeAndConnect();
+        if (args is ["--preview-preferences"]) return SettingsInteractionCheck.CheckPreviewPreferences();
         if (args is ["--startup-toggle", var fixture] && Guid.TryParseExact(fixture, "N", out var fixtureId))
             return StartupInventoryCheck.CheckToggle(fixtureId);
         if (args.FirstOrDefault() == "--startup-inventory") return StartupInventoryCheck.Run(args.ElementAtOrDefault(1));
@@ -58,10 +59,12 @@ internal static class Program
         bool drawerLayout = args.FirstOrDefault() == "--drawer-layout";
         var firstUse = homeLayout || drawerLayout || captionButtons || args is ["--first-use", _] or ["--settings"] or ["--settings", _] ? new FirstUseSessions() : null;
         long buildStart = Stopwatch.GetTimestamp();
+        string preferenceKey = $@"Software\SideStage.FrameCheck\{Guid.NewGuid():N}";
         using ParchmentPreviewForm window = new(vault, logDirectory, folder => { openedFolder = folder; folderOpenCount++; },
             pollSessions: !homeLayout && !drawerLayout && !captionButtons && args is not ["--connected-resize"], sessionInspector: firstUse,
-            enableChildSessions: firstUse is null ? null : firstUse.EnableAsync) { StartPosition = FormStartPosition.Manual, TopMost = true,
+            enableChildSessions: firstUse is null ? null : firstUse.EnableAsync, updatePreferenceKey: preferenceKey) { StartPosition = FormStartPosition.Manual, TopMost = true,
             Bounds = initial };
+        window.Disposed += (_, _) => Microsoft.Win32.Registry.CurrentUser.DeleteSubKey(preferenceKey, false);
         TimeSpan buildTime = Stopwatch.GetElapsedTime(buildStart);
         back.Show();
         other.Show(back);

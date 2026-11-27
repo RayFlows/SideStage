@@ -43,8 +43,8 @@ internal sealed partial class ParchmentPreviewForm : Form
     private readonly string _logDirectory, _logFile;
     private readonly Action<string> _openFolder;
     private bool _logWriteFailed;
-    private readonly ChildSessionPreviewPanel _previewPanel = new(ChildSessionPreviewSettings.Default,
-        ChildSessionAudioMode.DoNotPlay, surface => new PaperScrollPage(surface) { BackColor = CardLight });
+    private readonly PreviewPreferences _previewPreferences;
+    private readonly ChildSessionPreviewPanel _previewPanel;
     private readonly System.Windows.Forms.Timer _refreshTimer = new();
 
     // ── UI 控件引用 ───────────────────────────────────────────────────────
@@ -111,6 +111,9 @@ internal sealed partial class ParchmentPreviewForm : Form
     {
         _updates = updateFeed ?? ReleaseUpdateFeed.FromBuild();
         _updatePreferenceKey = updatePreferenceKey;
+        _previewPreferences = new(updatePreferenceKey);
+        _previewPanel = new(_previewPreferences.Display, _previewPreferences.Audio,
+            surface => new PaperScrollPage(surface) { BackColor = CardLight });
         _startupInventory = startupInventory ?? new StartupInventory(logDirectory == null
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SideStage", "StartupInventory")
             : Path.Combine(logDirectory, "StartupInventory"));
@@ -439,7 +442,8 @@ internal sealed partial class ParchmentPreviewForm : Form
         p.AddRow(_preserveAspectRatioToggle);
 
         // 音频
-        _muteAudioToggle = new SettingsSwitch("静音子会话", _bodyFont) { Checked = true };
+        _muteAudioToggle = new SettingsSwitch("静音子会话", _bodyFont)
+            { Checked = _previewPreferences.Audio == ChildSessionAudioMode.DoNotPlay };
         p.AddRow(_muteAudioToggle);
 
         // 注册变更事件
@@ -448,7 +452,7 @@ internal sealed partial class ParchmentPreviewForm : Form
         _preserveAspectRatioToggle.CheckedChanged  += ChangeDisplaySettings;
         _muteAudioToggle.CheckedChanged            += ChangeAudioMode;
 
-        SynchronizeDisplaySettingsControls(_previewPanel.Settings);
+        SynchronizeDisplaySettingsControls(_previewPanel.Settings, _previewPreferences.CustomResolution);
         return p;
     }
 
@@ -786,6 +790,7 @@ internal sealed partial class ParchmentPreviewForm : Form
         {
             _muteAudioToggle.Enabled = false;
             _audioReconnect.Change(_previewPanel.PreviewControl, mode);
+            if (!_previewPreferences.SaveAudio(mode)) AppendLog("声音设置已应用，但保存失败。", LogLevel.Warning);
             AppendLog(_audioReconnect.Active ? "正在切换子会话声音，等待旧连接断开。" :
                 _muteAudioToggle.Checked ? "子会话声音已设为关闭。" : "子会话声音已设为转发到本机。");
         }
@@ -847,6 +852,8 @@ internal sealed partial class ParchmentPreviewForm : Form
             ChildSessionPreviewSettings settings = new(
                 resolution, scaleOpt.Mode, _preserveAspectRatioToggle?.Checked ?? true);
             _previewPanel.SetSettings(settings);
+            if (!_previewPreferences.SaveDisplay(settings, resOpt.Resolution is null))
+                AppendLog("画面设置已应用，但保存失败。", LogLevel.Warning);
             SynchronizeDisplaySettingsControls(settings, keepCustomResolution: resOpt.Resolution is null);
             AppendLog($"画面设置：{settings.Resolution}，" +
                 $"{(settings.ScalingMode == PreviewScalingMode.OneToOne ? "1:1" : "自适应")}，" +
