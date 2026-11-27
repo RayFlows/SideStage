@@ -157,8 +157,8 @@ internal sealed partial class ParchmentPreviewForm
         if (batch.Candidates.Length == 0) return;
         string title = allowed ? "全部打开" : "全部关闭";
         string action = allowed ? "撤销子会话的跳过规则，沿用 Windows 的启动设置" : "在下次登录子会话时跳过";
-        if (MessageBox.Show(this, $"将对 {batch.Candidates.Length} 项{action}。其余 {batch.Skipped} 项跳过。\n\n继续吗？",
-            title, MessageBoxButtons.OKCancel, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.OK) return;
+        if (!PaperDialog.Confirm(this, $"{title}子会话启动项？",
+            $"将对 {batch.Candidates.Length} 项{action}。其余 {batch.Skipped} 项跳过。", title)) return;
         _changingStartupItems = true;
         _startupScanNotice = $"正在处理 {batch.Candidates.Length} 个启动项…";
         UpdateStartupScanStatus();
@@ -169,7 +169,7 @@ internal sealed partial class ParchmentPreviewForm
             if (IsDisposed || Disposing) return;
             if (batch.Repairs.Count != 0)
             {
-                var approved = ConfirmStartupRepairs(batch.Repairs);
+                var approved = ConfirmStartupRepairs(this, batch.Repairs);
                 await Task.Run(() => batch.FinishRepairs(registrations, approved));
             }
             if (IsDisposed || Disposing) return;
@@ -194,23 +194,18 @@ internal sealed partial class ParchmentPreviewForm
     }
 
     /// <summary>批量选择只针对本次任务和旧账户。默认全部未选，取消后保留每个原触发器。</summary>
-    private HashSet<StartupRuleBatch.Repair> ConfirmStartupRepairs(List<StartupRuleBatch.Repair> repairs)
+    internal static HashSet<StartupRuleBatch.Repair> ConfirmStartupRepairs(IWin32Window owner, List<StartupRuleBatch.Repair> repairs)
     {
-        using var dialog = new Form { Text = "修复登录任务", Font = _bodyFont, StartPosition = FormStartPosition.CenterParent,
-            ShowInTaskbar = false, MinimizeBox = false, MaximizeBox = false, Size = new Size(640, 360),
-            MinimumSize = new Size(420, 260), BackColor = PaperFieldSurface.Paper, AutoScaleMode = AutoScaleMode.Dpi };
-        var heading = new Label { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(12),
-            Text = "勾选要修复的任务。恢复启动开关后，任务仍使用新账户。" };
-        var list = new CheckedListBox { Dock = DockStyle.Fill, CheckOnClick = true, HorizontalScrollbar = true,
-            AccessibleName = "需要修复的登录任务", IntegralHeight = false };
+        using var dialog = new PaperDialog(Program.DisplayName, "修复登录任务",
+            "勾选要修复的任务。恢复启动开关后，任务仍使用新账户。", width: 520);
+        var list = new CheckedListBox { Dock = DockStyle.Top, CheckOnClick = true, HorizontalScrollbar = true,
+            AccessibleName = "需要修复的登录任务", IntegralHeight = false, BorderStyle = BorderStyle.None,
+            BackColor = PaperFieldSurface.Paper, ForeColor = PaperFieldSurface.Ink,
+            Height = Math.Min(8, repairs.Count) * (dialog.Font.Height + 4) + 20, Margin = new Padding(0, 12, 0, 0) };
         foreach (var repair in repairs) list.Items.Add(repair, false);
-        var footer = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft };
-        var accept = new Button { Text = "应用所选", AutoSize = true, DialogResult = DialogResult.OK };
-        var skip = new Button { Text = "全部跳过", AutoSize = true, DialogResult = DialogResult.Cancel };
-        footer.Controls.AddRange([accept, skip]);
-        dialog.CancelButton = skip;
-        dialog.Controls.AddRange([list, heading, footer]);
-        return dialog.ShowDialog(this) == DialogResult.OK ? list.CheckedItems.Cast<StartupRuleBatch.Repair>().ToHashSet() : [];
+        dialog.AddOptions(list);
+        dialog.AddConfirmation("应用所选", "全部跳过");
+        return dialog.ShowDialog(owner) == DialogResult.OK ? list.CheckedItems.Cast<StartupRuleBatch.Repair>().ToHashSet() : [];
     }
 
     /// <summary>可操作应用排在最前。只读登记可展开查看，每条展示其来源和保留原因。</summary>
@@ -269,11 +264,10 @@ internal sealed partial class ParchmentPreviewForm
             try { current = registrations.SetAllowed(current, current.Blocked); }
             catch (StartupTriggerRepairRequired repair)
             {
-                var answer = MessageBox.Show(this,
+                if (!PaperDialog.Confirm(this, "修复登录任务",
                     $"「{current.DisplayName ?? current.Name}」的登录任务引用了 Windows 无法识别的账户「{repair.Previous}」。\n\n" +
                     $"将登录用户修复为「{repair.Current}」并应用这次开关设置？恢复开关后，任务仍使用修复后的账户。",
-                    "修复登录任务", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
-                if (answer != DialogResult.Yes) return;
+                    "修复并应用")) return;
                 current = registrations.SetAllowed(current, current.Blocked, repair.Previous);
             }
             row.Checked = !current.Blocked;

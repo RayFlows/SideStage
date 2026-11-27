@@ -3,7 +3,9 @@
   <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>SideStage</AssemblyName></PropertyGroup>
   <ItemGroup>
     <Compile Include="../../src/SideStage.App/UpdateHandoff.cs" Link="UpdateHandoff.cs" />
+    <Compile Include="../../src/SideStage.App/UpdateFileUse.cs" Link="UpdateFileUse.cs" />
     <Compile Include="../../src/SideStage.App/StartupElevation.cs" Link="StartupElevation.cs" />
+    <Compile Include="../../src/SideStage.App/DesktopRestart.cs" Link="DesktopRestart.cs" />
     <Compile Include="../../src/SideStage.App/PersonalUpdateProcess.cs" Link="PersonalUpdateProcess.cs" />
     <Compile Include="../../src/SideStage.App/StartupUserAccess.cs" Link="StartupUserAccess.cs" />
   </ItemGroup>

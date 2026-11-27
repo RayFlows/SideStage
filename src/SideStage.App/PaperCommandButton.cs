@@ -35,6 +35,14 @@ internal class PaperCommandButton : Button
         LostFocus += (_, _) => { _spaceDown = false; Invalidate(); };
     }
 
+    /// <summary>创建弹窗底部的命令按钮。宽度随文字增长，主操作使用黄铜底色。</summary>
+    internal static PaperCommandButton DialogAction(string text, bool accent = false) => new()
+    {
+        Text = text, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new(9, 4, 9, 4),
+        Margin = new(4, 3, 0, 3), FaceColor = accent ? PaperFieldSurface.Brass : PaperFieldSurface.Hover,
+        ForeColor = accent ? Color.White : PaperFieldSurface.Ink
+    };
+
     /// <summary>保留窗体的默认按钮语义，让默认操作获得轻微强调的底色。</summary>
     public override void NotifyDefault(bool value)
     {

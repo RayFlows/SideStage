@@ -65,9 +65,8 @@ internal sealed partial class ParchmentPreviewForm
                     if (_canLogoff) LogoffChildSession(this, EventArgs.Empty);
                     return;
                 case AboutCommand:
-                    MessageBox.Show(this, $"{Program.DisplayName}\n\n本程序使用 HarmonyOS Sans SC 字体。\n" +
-                        "Copyright 2021 Huawei Device Co., Ltd.", $"关于 {Program.DisplayName}", MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
+                    PaperDialog.Tell(this, $"关于 {Program.DisplayName}", "本程序使用 HarmonyOS Sans SC 字体。\n" +
+                        "Copyright 2021 Huawei Device Co., Ltd.");
                     return;
             }
         }

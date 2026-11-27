@@ -242,8 +242,7 @@ internal sealed partial class ParchmentPreviewForm
             catch (IOException)
             {
                 // 原窗口已退出，不能再用其状态标签报告管道失败。
-                MessageBox.Show("更新器提前退出，未能提交安装请求。请重新打开 SideStage 后重试。", "SideStage 更新",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                PaperDialog.Tell(null, "未能开始更新", "更新器提前退出。请重新打开 SideStage 后重试。", error: true);
             }
         }
         finally
@@ -256,9 +255,8 @@ internal sealed partial class ParchmentPreviewForm
     /// <summary>取得明确同意后断开预览并保留子会话，窗口实际退出后才提交安装。</summary>
     private async Task<bool> CloseForUpdateAsync()
     {
-        if (UpdateConnectionActive() && MessageBox.Show(_updateWindow,
-            "断开当前 RDP 连接，保留子会话并进入更新？", "断开连接并更新",
-            MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return false;
+        if (UpdateConnectionActive() && !PaperDialog.Confirm(_updateWindow, "断开连接并更新？",
+            "安装更新需要断开当前 RDP 连接。子会话及其中的程序会继续运行。", "断开并更新")) return false;
         CancelParentRecovery();
         var preview = _previewPanel.PreviewControl;
         await DisconnectForUpdateAsync(_audioReconnect.Cancel,

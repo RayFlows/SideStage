@@ -14,6 +14,115 @@ namespace SideStage.App.FrameCheck;
 
 internal static class SettingsInteractionCheck
 {
+    /// <summary>验证通用确认的默认键、取消与显式提交，以及真实任务选择窗的结果。仅传入虚构任务，不修改系统。</summary>
+    internal static int CheckPaperDialogs(string image)
+    {
+        using var owner = new Form { StartPosition = FormStartPosition.CenterScreen, ShowInTaskbar = false };
+        owner.Show();
+        foreach (string action in new[] { "Enter", "Escape", "关闭", "注销并关闭", "修复", "错误" })
+        {
+            Exception? failure = null;
+            owner.BeginInvoke(() =>
+            {
+                var dialog = Application.OpenForms.OfType<PaperDialog>().Single();
+                try
+                {
+                    var controls = Descendants(dialog).ToArray();
+                    if (action == "Enter")
+                    {
+                        var content = dialog.Controls[0];
+                        using var shot = new Bitmap(content.Width, content.Height);
+                        content.DrawToBitmap(shot, content.ClientRectangle);
+                        shot.Save(image, System.Drawing.Imaging.ImageFormat.Png);
+                    }
+                    if (action is "Enter" or "Escape")
+                    {
+                        var key = action == "Enter" ? Keys.Enter : Keys.Escape;
+                        var message = Message.Create(dialog.Handle, 0x0100, (nint)key, 0);
+                        Require(dialog.PreProcessMessage(ref message), "确认窗响应键盘操作");
+                    }
+                    else if (action == "关闭") dialog.Close();
+                    else if (action == "修复")
+                    {
+                        var list = controls.OfType<CheckedListBox>().Single();
+                        Require(list.CheckedItems.Count == 0, "修复任务默认全部未选");
+                        list.SetItemChecked(1, true);
+                        controls.OfType<Button>().Single(b => b.Text == "应用所选").PerformClick();
+                    }
+                    else if (action == "错误")
+                    {
+                        var text = controls.OfType<TextBox>().Single();
+                        Require(text.ReadOnly && text.ScrollBars == ScrollBars.Vertical && text.Text.Contains("最后一行"),
+                            "超长错误完整保留，可滚动和复制");
+                        controls.OfType<Button>().Single(b => b.Text == "确定").PerformClick();
+                    }
+                    else controls.OfType<Button>().Single(b => b.Text == action).PerformClick();
+                }
+                catch (Exception ex) { failure = ex; }
+                finally { if (dialog.DialogResult == DialogResult.None) dialog.Close(); }
+            });
+
+            if (action == "修复")
+            {
+                var repairs = new[] { "测试一", "测试二" }.Select(name =>
+                    new StartupRuleBatch.Repair(new StartupEntry("Task", name, "验收"), "旧账户", "新账户")).ToList();
+                var chosen = ParchmentPreviewForm.ConfirmStartupRepairs(owner, repairs);
+                Require(chosen.SetEquals([repairs[1]]), "应用所选仅返回已勾选任务");
+            }
+            else if (action == "错误")
+                PaperDialog.Tell(owner, "无法连接子会话", string.Join("\n", Enumerable.Repeat("测试诊断", 30)) + "\n最后一行", error: true);
+            else
+                Require(PaperDialog.Confirm(owner, "关闭 SideStage", "注销子会话 3 并关闭窗口？\r\n\r\n子会话中的程序将全部结束，未保存的工作会丢失。",
+                    "注销并关闭") == (action == "注销并关闭"), $"关闭确认响应 {action}");
+            if (failure != null) throw new InvalidOperationException("纸面弹窗验收失败。", failure);
+        }
+        return 0;
+    }
+
+    /// <summary>打开实际模态弹窗，截取客户区并验证回车、直接连接、Esc 和标题栏关闭的结果。全程使用临时窗口。</summary>
+    internal static int CheckCredentialReminder(string image)
+    {
+        using var owner = new Form { StartPosition = FormStartPosition.CenterScreen, ShowInTaskbar = false };
+        owner.Show();
+        foreach (var action in new[] { "Enter", "直接连接", "Escape", "关闭" })
+        {
+            Exception? failure = null;
+            owner.BeginInvoke(() =>
+            {
+                var dialog = Application.OpenForms.OfType<CredentialReminderDialog>().Single();
+                try
+                {
+                    var check = Descendants(dialog).OfType<CheckBox>().Single();
+                    var buttons = Descendants(dialog).OfType<PaperCommandButton>().ToArray();
+                    Require(!check.Checked && buttons.Length == 3, "提醒默认未勾选，显示三个操作");
+                    if (action == "Enter")
+                    {
+                        var content = dialog.Controls[0];
+                        using var shot = new Bitmap(content.Width, content.Height);
+                        content.DrawToBitmap(shot, content.ClientRectangle);
+                        shot.Save(image, System.Drawing.Imaging.ImageFormat.Png);
+                    }
+                    else check.Checked = true;
+                    if (action is "Enter" or "Escape")
+                    {
+                        var key = action == "Enter" ? Keys.Enter : Keys.Escape;
+                        var message = Message.Create(dialog.Handle, 0x0100, (nint)key, 0);
+                        Require(dialog.PreProcessMessage(ref message), "窗体响应默认键或取消键");
+                    }
+                    else if (action == "直接连接") buttons.Single(b => b.Text == action).PerformClick();
+                    else dialog.Close();
+                }
+                catch (Exception ex) { failure = ex; }
+                finally { if (dialog.DialogResult == DialogResult.None) dialog.Close(); }
+            });
+            var answer = CredentialReminderDialog.Ask(owner);
+            if (failure != null) throw new InvalidOperationException("登录提醒验收失败。", failure);
+            var expected = action switch { "Enter" => CredentialChoice.Configure, "直接连接" => CredentialChoice.Direct, _ => CredentialChoice.Cancel };
+            Require(answer == (expected, action != "Enter"), $"登录提醒响应 {action}");
+        }
+        return 0;
+    }
+
     /// <summary>从高级设置修改画面与声音，原窗口仍打开时再创建两个入口，验证偏好已保存并用于实际预览。</summary>
     internal static int CheckPreviewPreferences()
     {
@@ -51,7 +160,7 @@ internal static class SettingsInteractionCheck
     }
 
     /// <summary>
-    /// 用单独的注册表键和凭据项检查管理员开关，再从同一真实窗口分别提交首次输入和已保存凭据。
+    /// 用隔离的注册表键和凭据项检查管理员开关、首次配置提示和两种连接方式。
     /// 用记录侧栏可见性的回调代替 RDP 调用，以便在请求发出的当下验收界面，无需实际登录。
     /// </summary>
     internal static int CheckPrivilegeAndConnect()
@@ -62,6 +171,9 @@ internal static class SettingsInteractionCheck
         var sessions = new Program.FirstUseSessions();
         sessions.EnableAsync().GetAwaiter().GetResult();
         var drawerStatesAtRequest = new List<bool>();
+        var directRequests = new List<bool>();
+        var answers = new Queue<(CredentialChoice, bool)>([(CredentialChoice.Cancel, true),
+            (CredentialChoice.Configure, false), (CredentialChoice.Direct, true)]);
         DrawerCollapseTab? tab = null;
         Point originalCursor = Cursor.Position;
         try
@@ -72,7 +184,11 @@ internal static class SettingsInteractionCheck
             using var window = new ParchmentPreviewForm(vault, Path.Combine(Path.GetTempPath(), "SideStage.FrameCheck", id),
                 pollSessions: false, sessionInspector: sessions, updatePreferenceKey: key,
                 updateFeed: new ReleaseUpdateFeed(client, "1.0.0", null),
-                requestPreviewConnection: _ => drawerStatesAtRequest.Add(tab!.Visible))
+                requestPreviewConnection: credentials =>
+                {
+                    drawerStatesAtRequest.Add(tab!.Visible);
+                    directRequests.Add(credentials is null);
+                }, askLoginMethod: answers.Dequeue)
                 { TopMost = true, StartPosition = FormStartPosition.CenterScreen, Size = new Size(1000, 760) };
             owner.Show();
             window.Show(owner);
@@ -118,20 +234,30 @@ internal static class SettingsInteractionCheck
             window.DisplayPrivilegeCheck(true);
             Require(recovery.Enabled && !recovery.Checked && !ParchmentPreviewForm.ReadRecoveryPreference(key), "先前手动关闭的功能仍然关闭");
 
-            // 第一次从展开的侧栏点连接，必须等到凭据通过校验；第二次直接从同一个隔离保存项读取。
+            // 首页连接和高级设置应复用同一张管理页。再次导航到已打开的页面应保留草稿。
             connect.PerformClick();
             var editor = Descendants(window).OfType<InlineCredentialEditor>().Single();
-            var submit = Descendants(editor).OfType<Button>().Single(b => b.Text == "连接");
+            var submit = Descendants(editor).OfType<Button>().Single(b => b.Text == "保存凭据");
+            Require(!Descendants(editor).Any(c => c.Text is "连接" or "保存到本机"), "首次连接直接打开标准凭据设置页");
             submit.PerformClick();
-            Require(tab.Visible && editor.Visible && drawerStatesAtRequest.Count == 0, "缺少密码时保留输入页等待用户填写");
+            Require(tab.Visible && editor.Visible && !vault.HasSavedCredentials() && answers.Count == 3,
+                "留空保存只在页内提示填写密码");
             Descendants(editor).OfType<TextBox>().Single(t => t.AccessibleName == "密码").Text = "FrameCheck-only";
-            submit.PerformClick();
-            Require(drawerStatesAtRequest.SequenceEqual([false]) && editor.IsDisposed && vault.HasSavedCredentials(),
-                "提交有效表单后先收起侧栏再请求 RDP");
-            advanced.PerformClick();
-            Require(tab.Visible, "已保存凭据时从展开的高级设置开始连接");
             connect.PerformClick();
-            Require(drawerStatesAtRequest.SequenceEqual([false, false]) && !tab.Visible, "读取保存项后先收起侧栏再请求 RDP");
+            connect.PerformClick();
+            Require(answers.Count == 1 && ReferenceEquals(editor, Descendants(window).OfType<InlineCredentialEditor>().Single())
+                && Descendants(editor).OfType<TextBox>().Single(t => t.AccessibleName == "密码").Text == "FrameCheck-only",
+                "再次点首页连接先提醒，取消或选择配置保留原页草稿");
+            submit.PerformClick();
+            Require(drawerStatesAtRequest.Count == 0 && tab.Visible && editor.IsDisposed && vault.HasSavedCredentials(),
+                "保存后返回高级设置，等待用户主动连接");
+            connect.PerformClick();
+            Require(drawerStatesAtRequest.SequenceEqual([false]) && !tab.Visible, "读取保存项后先收起侧栏再请求 RDP");
+            vault.Delete();
+            connect.PerformClick();
+            connect.PerformClick();
+            Require(directRequests.SequenceEqual([false, true, true]) && !tab.Visible && !vault.HasSavedCredentials()
+                && answers.Count == 0, "跳过提示的选择只在确认直接连接后生效，无密码也能请求 RDP");
             return 0;
         }
         finally
@@ -475,7 +601,7 @@ internal static class SettingsInteractionCheck
         finally { Cursor.Position = origin; window.DisplayWindowsEdition(real); }
     }
 
-    /// <summary>用测试专属的凭据库走首页与管理入口。只保存和删除测试条目，连接页通过返回退出。</summary>
+    /// <summary>从首页与侧栏进入凭据设置，验证密码编辑以及隔离测试条目的保存和删除。</summary>
     private static void CheckCredentialPage(ParchmentPreviewForm window, string? screenshot)
     {
         Button ButtonNamed(string text) => Descendants(window).OfType<Button>().Single(b => b.Visible && (b.Text == text || b.AccessibleName == text));
@@ -489,8 +615,7 @@ internal static class SettingsInteractionCheck
         Require(Field("账户名").Visible && Field("密码").PasswordChar == '\u00B7', "首次连接使用小圆点遮盖密码");
         Require(Field("账户名").Text == Environment.UserName && Field("密码").TextLength == 0 &&
             !Field("账户名").Focused && !Field("密码").Focused, "首次连接预填当前账户名，等待用户选择输入框");
-        var save = Descendants(window).OfType<SettingsSwitch>().Single(s => s.Text == "保存到本机");
-        save.Checked = false;
+        Require(ButtonNamed("保存凭据").Visible, "从首页连接进入标准登录凭据页");
         Field("密码").Text = "frame-check-discard";
         var password = Field("密码");
         password.Focus();

@@ -473,11 +473,13 @@ internal sealed partial class ParchmentPreviewForm
         DwmSetWindowAttribute(Handle, borderColor, ref hideSystemBorder, sizeof(int));
     }
  
-    /// <summary>释放由此窗体单独持有的标题栏符号字体。</summary>
+    /// <summary>随窗口关闭日志维护计时器与文件租约，并释放标题栏绘图资源。</summary>
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            _logMaintenance.Dispose();
+            _activityLog?.Dispose();
             _captionIcon?.Dispose();
             _captionSymbols.Dispose();
         }

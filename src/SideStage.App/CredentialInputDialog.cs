@@ -1,7 +1,7 @@
 /*
  * 文件名称：CredentialInputDialog.cs
  * 文件职责：
- *   让用户在本机输入 Windows 账户登录信息，并选择本次使用或保存到 Windows 凭据管理器。
+ *   提供经典窗口的登录凭据设置，供用户保存、替换或删除本机凭据。
  *
  * 安全边界：
  *   - 不把密码写入事件日志、配置文件、命令行参数或窗口标题。
@@ -19,25 +19,22 @@ using SideStage.Windows.RemoteDesktop;
 namespace SideStage.App;
 
 /// <summary>
-/// 收集 Windows 子会话登录凭据，并可选地保存在当前用户的 Windows 凭据管理器中。
+/// 管理当前用户保存在 Windows 凭据管理器中的子会话登录凭据。
 /// </summary>
 internal sealed class CredentialInputDialog : Form
 {
-    private static readonly Color WindowColor = Color.FromArgb(244, 238, 224);
-    private static readonly Color SurfaceColor = Color.FromArgb(232, 218, 195);
-    private static readonly Color TextColor = Color.FromArgb(72, 48, 48);
+    private static readonly Color WindowColor = PaperFieldSurface.Paper;
+    private static readonly Color SurfaceColor = PaperFieldSurface.Hover;
+    private static readonly Color TextColor = PaperFieldSurface.Ink;
     private static readonly Color MutedTextColor = Color.FromArgb(103, 82, 65);
-    private static readonly Color AccentColor = Color.FromArgb(87, 67, 50);
+    private static readonly Color AccentColor = PaperFieldSurface.Brass;
     private readonly Font _dialogFont = TheatreTypography.Create(10);
     private readonly WindowsChildSessionCredentialStore _credentialStore;
-    private readonly bool _requirePersistentSave;
     private readonly TextBox _userNameInput = new();
     private readonly TextBox _domainInput = new();
     private readonly TextBox _passwordInput = new();
     private readonly TableLayoutPanel _rootLayout = new();
     private readonly PaperCommandButton _advancedOptionsButton = new();
-    private readonly CheckBox _saveCredentialInput = new();
-    private readonly PaperCommandButton _useSavedButton = new();
     private readonly PaperCommandButton _deleteSavedButton = new();
     private readonly PaperCommandButton _confirmButton = new();
     private Label? _domainLabel;
@@ -45,22 +42,14 @@ internal sealed class CredentialInputDialog : Form
     private bool _advancedOptionsExpanded;
 
     /// <summary>
-    /// 获取由对话框创建、并转交给调用方负责释放的本次登录凭据。
-    /// </summary>
-    public WindowsChildSessionCredentials? Credentials { get; private set; }
-
-    /// <summary>
     /// 建立子会话登录凭据输入窗口。
     /// </summary>
     /// <param name="credentialStore">当前 Windows 用户的凭据管理器访问器。</param>
-    /// <param name="requirePersistentSave">是否要求保存凭据，用于凭据管理操作。</param>
-    public CredentialInputDialog(
-        WindowsChildSessionCredentialStore credentialStore,
-        bool requirePersistentSave = false)
+    public CredentialInputDialog(WindowsChildSessionCredentialStore credentialStore)
     {
         _credentialStore = credentialStore;
-        _requirePersistentSave = requirePersistentSave;
 
+        Program.ApplyIdentity(this);
         Text = "Windows 登录凭据";
         BackColor = WindowColor;
         ForeColor = TextColor;
@@ -70,31 +59,26 @@ internal sealed class CredentialInputDialog : Form
         MinimizeBox = false;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(500, 350);
 
         BuildLayout();
         LoadSavedAccount();
-        UpdateSavedCredentialButtons();
+        _deleteSavedButton.Enabled = _credentialStore.HasSavedCredentials();
     }
 
     /// <summary>
-    /// 释放对话框中尚未转交的凭据对象。
+    /// 清除未保存的密码草稿并释放对话框字体。
     /// </summary>
     /// <param name="disposing">是否执行托管资源释放。</param>
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
-        {
-            Credentials?.Dispose();
-            Credentials = null;
-        }
+        if (disposing && !_passwordInput.IsDisposed) { _passwordInput.Clear(); _passwordInput.ClearUndo(); }
 
         base.Dispose(disposing);
         if (disposing) _dialogFont.Dispose();
     }
 
     /// <summary>
-    /// 创建凭据输入区、保存选项和显式操作按钮。
+    /// 创建凭据输入区、保存说明和操作按钮。
     /// </summary>
     private void BuildLayout()
     {
@@ -102,7 +86,7 @@ internal sealed class CredentialInputDialog : Form
         _rootLayout.Dock = DockStyle.Fill;
         _rootLayout.Padding = new Padding(20);
         _rootLayout.ColumnCount = 2;
-        _rootLayout.RowCount = 9;
+        _rootLayout.RowCount = 8;
         _rootLayout.BackColor = WindowColor;
         _rootLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104));
         _rootLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -110,7 +94,6 @@ internal sealed class CredentialInputDialog : Form
         _rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         _rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         _rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-        _rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         _rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         _rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         _rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
@@ -166,14 +149,6 @@ internal sealed class CredentialInputDialog : Form
         _rootLayout.Controls.Add(_domainHelpLabel, 0, 5);
         _rootLayout.SetColumnSpan(_domainHelpLabel, 2);
 
-        _saveCredentialInput.Text = "保存在此 Windows 用户的凭据管理器中";
-        _saveCredentialInput.AutoSize = true;
-        _saveCredentialInput.ForeColor = TextColor;
-        _saveCredentialInput.BackColor = WindowColor;
-        _saveCredentialInput.Checked = true;
-        _saveCredentialInput.Enabled = !_requirePersistentSave;
-        _rootLayout.Controls.Add(_saveCredentialInput, 1, 6);
-
         Label securityNote = new()
         {
             Text = "保存后由 Windows 按当前用户保护；连接时本机应用会读取凭据并交给 RDP。不会上传。",
@@ -181,7 +156,7 @@ internal sealed class CredentialInputDialog : Form
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
         };
-        _rootLayout.Controls.Add(securityNote, 0, 7);
+        _rootLayout.Controls.Add(securityNote, 0, 6);
         _rootLayout.SetColumnSpan(securityNote, 2);
 
         FlowLayoutPanel actions = new()
@@ -191,18 +166,12 @@ internal sealed class CredentialInputDialog : Form
             WrapContents = false,
             BackColor = WindowColor,
         };
-        ConfigureActionButton(_confirmButton, _requirePersistentSave ? "保存" : "连接", OnConfirm, AccentColor);
-        ConfigureActionButton(_useSavedButton, "使用已保存", OnUseSaved, SurfaceColor);
+        ConfigureActionButton(_confirmButton, "保存凭据", OnConfirm, AccentColor);
         ConfigureActionButton(_deleteSavedButton, "删除保存项", OnDeleteSaved, SurfaceColor);
 
         actions.Controls.Add(_confirmButton);
-        if (!_requirePersistentSave)
-        {
-            actions.Controls.Add(_useSavedButton);
-        }
-
         actions.Controls.Add(_deleteSavedButton);
-        _rootLayout.Controls.Add(actions, 0, 8);
+        _rootLayout.Controls.Add(actions, 0, 7);
         _rootLayout.SetColumnSpan(actions, 2);
         _rootLayout.ResumeLayout(performLayout: true);
         Controls.Add(_rootLayout);
@@ -236,7 +205,7 @@ internal sealed class CredentialInputDialog : Form
         _advancedOptionsButton.Text = expanded
             ? "高级选项（域账号才需要） -"
             : "高级选项（域账号才需要） +";
-        ClientSize = new Size(500, expanded ? 410 : 350);
+        ClientSize = new Size(500, _rootLayout.Padding.Vertical + _rootLayout.RowStyles.Cast<RowStyle>().Sum(row => (int)row.Height));
     }
 
     /// <summary>
@@ -303,7 +272,7 @@ internal sealed class CredentialInputDialog : Form
         button.FlatStyle = FlatStyle.Flat;
         button.FlatAppearance.BorderSize = 0;
         button.FaceColor = background;
-        button.ForeColor = background == AccentColor ? WindowColor : TextColor;
+        button.ForeColor = background == AccentColor ? Color.White : TextColor;
         button.Margin = new Padding(4, 0, 0, 0);
         button.Click += onClick;
     }
@@ -329,17 +298,7 @@ internal sealed class CredentialInputDialog : Form
     }
 
     /// <summary>
-    /// 根据 Windows 凭据管理器中是否存在条目更新“使用”和“删除”按钮。
-    /// </summary>
-    private void UpdateSavedCredentialButtons()
-    {
-        bool hasSavedCredentials = _credentialStore.HasSavedCredentials();
-        _useSavedButton.Enabled = hasSavedCredentials;
-        _deleteSavedButton.Enabled = hasSavedCredentials;
-    }
-
-    /// <summary>
-    /// 收集本次输入，按勾选状态决定是否先保存，再将凭据交给调用方。
+    /// 收集并保存输入，返回成功时释放本次使用的凭据对象。
     /// </summary>
     /// <param name="sender">触发操作的按钮。</param>
     /// <param name="eventArgs">按钮事件参数。</param>
@@ -347,63 +306,14 @@ internal sealed class CredentialInputDialog : Form
     {
         try
         {
-            WindowsChildSessionCredentials credentials = ReadFields(_userNameInput, _advancedOptionsExpanded ? _domainInput.Text : "", _passwordInput);
-            try
-            {
-                if (_requirePersistentSave || _saveCredentialInput.Checked)
-                {
-                    _credentialStore.Save(credentials);
-                }
-
-                Credentials = credentials;
-                _passwordInput.Clear();
-                DialogResult = DialogResult.OK;
-                Close();
-            }
-            catch
-            {
-                credentials.Dispose();
-                throw;
-            }
-        }
-        catch (Exception exception) when (exception is ArgumentException or System.ComponentModel.Win32Exception)
-        {
-            MessageBox.Show(
-                this,
-                exception.Message,
-                "无法处理登录凭据",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
-        }
-    }
-
-    /// <summary>
-    /// 读取当前 Windows 用户保存的凭据并交给调用方。
-    /// </summary>
-    /// <param name="sender">触发操作的按钮。</param>
-    /// <param name="eventArgs">按钮事件参数。</param>
-    private void OnUseSaved(object? sender, EventArgs eventArgs)
-    {
-        try
-        {
-            Credentials = _credentialStore.Read();
-            if (Credentials is null)
-            {
-                UpdateSavedCredentialButtons();
-                return;
-            }
-
+            using var credentials = ReadFields(_userNameInput, _advancedOptionsExpanded ? _domainInput.Text : "", _passwordInput);
+            _credentialStore.Save(credentials);
             DialogResult = DialogResult.OK;
             Close();
         }
-        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidDataException)
+        catch (Exception exception) when (exception is ArgumentException or System.ComponentModel.Win32Exception)
         {
-            MessageBox.Show(
-                this,
-                exception.Message,
-                "无法读取已保存凭据",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
+            PaperDialog.Tell(this, "无法处理登录凭据", exception.Message, error: true);
         }
     }
 
@@ -414,14 +324,8 @@ internal sealed class CredentialInputDialog : Form
     /// <param name="eventArgs">按钮事件参数。</param>
     private void OnDeleteSaved(object? sender, EventArgs eventArgs)
     {
-        DialogResult confirmation = MessageBox.Show(
-            this,
-            "删除 SideStage 保存的子会话登录凭据？此操作不会删除 Windows 账户。",
-            "删除本机保存项",
-            MessageBoxButtons.YesNo,
-            MessageBoxIcon.Warning,
-            MessageBoxDefaultButton.Button2);
-        if (confirmation != DialogResult.Yes)
+        if (!PaperDialog.Confirm(this, "删除本机登录凭据？",
+            "将移除 SideStage 保存的子会话登录凭据。您的 Windows 账户会保留。", "删除凭据"))
         {
             return;
         }
@@ -430,16 +334,11 @@ internal sealed class CredentialInputDialog : Form
         {
             _credentialStore.Delete();
             _passwordInput.Clear();
-            UpdateSavedCredentialButtons();
+            _deleteSavedButton.Enabled = false;
         }
         catch (System.ComponentModel.Win32Exception exception)
         {
-            MessageBox.Show(
-                this,
-                exception.Message,
-                "无法删除已保存凭据",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
+            PaperDialog.Tell(this, "无法删除已保存凭据", exception.Message, error: true);
         }
     }
 

@@ -88,19 +88,55 @@ internal sealed class UpdateDownload
         finally { File.Delete(partial); }
     }
 
+    /// <summary>应用启动时按文件写入时间清理安装和重启诊断，即使用户长期没有下载新版也会回收。</summary>
+    internal void RemoveExpiredLogs()
+    {
+        try
+        {
+            StartupUserAccess.AsUser(() =>
+            {
+                DateTime cutoff = DateTime.UtcNow.AddDays(-ActivityLogStore.RetentionDays);
+                foreach (var item in CacheDirectories())
+                {
+                    foreach (string name in new[] { "install.log", "restart-error.log" })
+                    {
+                        try
+                        {
+                            var file = new FileInfo(Path.Combine(item.FullName, name));
+                            if (file.Exists && !file.Attributes.HasFlag(FileAttributes.ReparsePoint) && file.LastWriteTimeUtc <= cutoff)
+                                file.Delete();
+                        }
+                        catch (Exception ex) when (ActivityLogStore.IsFileError(ex)) { /* 跳过占用项，继续检查其余日志。 */ }
+                    }
+                }
+                return true;
+            });
+        }
+        catch (Exception ex) when (ActivityLogStore.IsFileError(ex)) { /* 清理可以等到下次启动。 */ }
+    }
+
+    /// <summary>只枚举摘要命名的直接子目录，日志与安装缓存共用相同的文件系统范围。</summary>
+    private IEnumerable<DirectoryInfo> CacheDirectories()
+    {
+        var root = new DirectoryInfo(_root);
+        if (!root.Exists || root.Attributes.HasFlag(FileAttributes.ReparsePoint)) yield break;
+        foreach (var item in root.EnumerateDirectories())
+            if (Regex.IsMatch(item.Name, @"\A[0-9a-f]{64}\z") && !item.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                yield return item;
+    }
+
     /// <summary>下次下载时回收至少十四天未使用的旧缓存。只处理本程序固定格式的目录及附件，不遍历链接。</summary>
     private void RemoveExpiredCaches(string keep)
     {
         try
         {
-            var root = new DirectoryInfo(_root);
-            if (!root.Exists || root.Attributes.HasFlag(FileAttributes.ReparsePoint)) return;
-            foreach (var item in root.EnumerateDirectories())
+            DateTime cutoff = DateTime.UtcNow.AddDays(-ActivityLogStore.RetentionDays);
+            foreach (var item in CacheDirectories())
             {
-                if (item.Name == keep || !Regex.IsMatch(item.Name, @"\A[0-9a-f]{64}\z") ||
-                    item.Attributes.HasFlag(FileAttributes.ReparsePoint) || item.LastWriteTimeUtc > DateTime.UtcNow.AddDays(-14)) continue;
+                if (item.Name == keep || item.LastWriteTimeUtc > cutoff) continue;
                 foreach (var file in item.EnumerateFiles())
-                    if (!file.Attributes.HasFlag(FileAttributes.ReparsePoint) && (file.Name is "install.log" or "SideStage.Updater.exe" ||
+                    if (!file.Attributes.HasFlag(FileAttributes.ReparsePoint) && (file.Name == "SideStage.Updater.exe" ||
+                        ((file.Name is "install.log" or "restart-error.log") && file.LastWriteTimeUtc <= cutoff) ||
                         Regex.IsMatch(file.Name, @"\A(?:[0-9a-f]{32}\.part|SideStage-\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?-Setup-x64\.exe)\z")))
                         file.Delete();
                 if (!item.EnumerateFileSystemInfos().Any()) item.Delete();

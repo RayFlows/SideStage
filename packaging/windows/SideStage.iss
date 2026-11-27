@@ -320,6 +320,11 @@ var
   I: Integer;
 begin
   if (CurStep <> ssPostInstall) or (InstalledDir = '') then exit;
+  { 只有应用内升级才需要脱离更新器的受限启动环境。新版主程序领取后立即删除标记。
+    使用本安装的卸载项，不碰用户偏好；手动安装由完成页直接从正常桌面启动。 }
+  if ExpandConstant('{param:SIDESTAGEUPDATE|0}') = '1' then
+    if not RegWriteDWordValue(HKCU, UninstallKey, 'SideStagePendingDesktopRestart', 1) then
+      Log('SideStage: could not record pending desktop restart');
   if Pos('|' + InstalledVersion + '|',
     '|0.1.0-beta.1|0.1.0-beta.2|0.1.0-beta.3|0.1.0-beta.4|0.1.0-beta.5|0.1.0-beta.6|') = 0 then exit;
   Root := RemoveBackslashUnlessRoot(ExpandConstant('{app}'));

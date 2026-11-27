@@ -41,23 +41,48 @@ internal static class Program
     {
         if (args is [ChildSessionEnableCommand.Argument]) return ChildSessionEnableCommand.EnableOnce();
         string sid;
+        string? startupNotice = null;
+        bool elevated = StartupElevation.IsAdministrator();
         using (var identity = WindowsIdentity.GetCurrent())
+        {
             sid = identity.User?.Value ?? throw new InvalidOperationException("无法识别当前 Windows 用户。");
+            if (args.Length == 0 && !elevated)
+            {
+                try
+                {
+                    if (DesktopRestart.TryOpenPending(DesktopRestart.UninstallKey, Environment.ProcessPath!, identity)) return 0;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or System.ComponentModel.Win32Exception)
+                {
+                    startupNotice = $"无法通过桌面重启，将按当前用户的启动设置继续。{ex.Message}";
+                }
+            }
+        }
         if (args is ["--restore-startup-items"] or ["--restore-startup-items", "--silent"])
             return RestoreForUninstall(sid, args.Length == 1);
         if (args is ["--authorized-restore", var expected])
             return expected == sid && StartupElevation.IsAdministrator() ? new StartupRegistrations().RestoreAll() : 1;
-        var route = StartupElevation.Choose(args, StartupElevation.IsAdministrator(), sid,
-            () => StartupElevation.IsEnabled(StartupElevation.SettingsKey), StartupElevation.Request);
+        // 桌面交接与授权各有独立的失败原因，同时发生时保留两条诊断。
+        Action<string> recordNotice = message => startupNotice = startupNotice == null ? message : $"{startupNotice} {message}";
+        var route = StartupElevation.Choose(args, elevated, sid,
+            () => StartupElevation.IsEnabled(StartupElevation.SettingsKey, recordNotice),
+            (classicMode, user) => StartupElevation.Request(classicMode, user, recordNotice));
         if (route == StartupRoute.Exit) return 0;
         if (route == StartupRoute.DifferentAccount) return StartupElevation.DifferentAccountExitCode;
         ApplicationConfiguration.Initialize();
+        // 在后台整理旧更新日志，让首屏显示与用户是否启用联网检查都不影响清理。
+        _ = Task.Run(new UpdateDownload().RemoveExpiredLogs);
         using var startupBroker = new StartupSessionBroker();
         using var protectedBroker = new StartupSessionBroker(ProtectedStartupStore.Location);
 
         // 两种界面的默认布局不同，分别记住各自的主窗口大小。
         bool classic = args.Contains("--classic");
         using Form window = classic ? new ClassicPreviewForm() : new ParchmentPreviewForm(new WindowsChildSessionCredentialStore());
+        if (startupNotice != null)
+        {
+            if (window is ParchmentPreviewForm home) home.AppendLog(startupNotice, ParchmentPreviewForm.LogLevel.Warning);
+            else if (window is ClassicPreviewForm classicHome) classicHome.AppendLog(startupNotice);
+        }
         WindowSizeMemory.Attach(window, @"Software\SideStage", classic ? "ClassicWindowSize" : "WindowSize");
         Application.Run(window);
         return 0;

@@ -27,8 +27,7 @@ internal sealed class UpdateHandoff : IDisposable
     /// <summary>核对安装登记和工作进程的启动回执。开发目录和便携副本不可静默覆盖已安装应用。</summary>
     internal static async Task<UpdateHandoff> PrepareAsync(VerifiedUpdate package, CancellationToken cancel)
     {
-        const string uninstall = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\{28C18EA6-CBC7-4C56-AFC2-A5307EAD9573}_is1";
-        using var entry = Registry.CurrentUser.OpenSubKey(uninstall);
+        using var entry = Registry.CurrentUser.OpenSubKey(DesktopRestart.UninstallKey);
         return await PrepareAtPathAsync(package, entry?.GetValue("InstallLocation") as string, cancel);
     }
 
@@ -38,6 +37,13 @@ internal sealed class UpdateHandoff : IDisposable
         if (string.IsNullOrWhiteSpace(location) ||
             !string.Equals(Path.GetFullPath(Path.Combine(location, "SideStage.exe")), Environment.ProcessPath, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("此窗口不在登记的安装目录中。请从开始菜单打开已安装的 SideStage 后更新。");
+        // 授权启动器正在等待当前窗口退出，会随之释放程序文件。其他窗口自己的启动器仍是占用者。
+        var args = Environment.GetCommandLineArgs();
+        int waitingLauncher = 0;
+        const string prefix = "--waiting-launcher=";
+        if (args is [_, "--authorized-window", _, ..] && args[^1].StartsWith(prefix, StringComparison.Ordinal))
+            int.TryParse(args[^1].AsSpan(prefix.Length), out waitingLauncher);
+        await Task.Run(() => UpdateFileUse.EnsureAvailable(location, waitingLauncher), cancel);
         string directory = Path.GetDirectoryName(package.FilePath)!;
         string workerPath = Path.Combine(directory, "SideStage.Updater.exe");
         StartupUserAccess.AsUser(() =>

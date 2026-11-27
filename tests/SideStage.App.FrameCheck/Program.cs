@@ -29,6 +29,8 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         if (args is ["--privilege-drawer"]) return SettingsInteractionCheck.CheckPrivilegeAndConnect();
+        if (args is ["--credential-reminder", var reminderImage]) return SettingsInteractionCheck.CheckCredentialReminder(reminderImage);
+        if (args is ["--paper-dialogs", var confirmImage]) return SettingsInteractionCheck.CheckPaperDialogs(confirmImage);
         if (args is ["--preview-preferences"]) return SettingsInteractionCheck.CheckPreviewPreferences();
         if (args is ["--startup-toggle", var fixture] && Guid.TryParseExact(fixture, "N", out var fixtureId))
             return StartupInventoryCheck.CheckToggle(fixtureId);

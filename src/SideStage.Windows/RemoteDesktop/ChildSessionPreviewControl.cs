@@ -46,6 +46,7 @@ public sealed class ChildSessionPreviewControl : AxHost
     private bool _isPrepared;
     private bool _waitingForConnection;
     private bool _rdpPasswordWasSet;
+    private bool _rdpIdentityWasSet;
     private SessionId? _connectionTarget;
     private SessionId? _expectedConnectionTarget;
 
@@ -575,10 +576,7 @@ public sealed class ChildSessionPreviewControl : AxHost
             _connectionTarget = null;
             LastLogonNotice = FatalError = DisconnectReason = null;
             LoginCompleted = false;
-            if (credentials is not null)
-            {
-                ConfigureLogonCredentials(GetActiveXOrThrow(), credentials);
-            }
+            ConfigureLogonCredentials(GetActiveXOrThrow(), credentials);
 
             InvokeComMethod(GetActiveXOrThrow(), "Connect");
         }
@@ -881,10 +879,28 @@ public sealed class ChildSessionPreviewControl : AxHost
     /// 将本次连接的账户、域和密码交给本机 RDP ActiveX，不写入应用配置。
     /// </summary>
     /// <param name="activeX">已经配置为本机子会话目标的 RDP 控件。</param>
-    /// <param name="credentials">本次连接使用的受保护凭据。</param>
+    /// <param name="credentials">本次连接使用的受保护凭据。传空时移除上次显式提供的身份。</param>
     /// <exception cref="InvalidOperationException">ActiveX 不支持必要的凭据接口时抛出。</exception>
-    private void ConfigureLogonCredentials(object activeX, WindowsChildSessionCredentials credentials)
+    private void ConfigureLogonCredentials(object activeX, WindowsChildSessionCredentials? credentials)
     {
+        if (credentials is null)
+        {
+            if (!_rdpIdentityWasSet) return;
+            // 登录事件中清理密码可能失败。直接连接前必须清理成功，避免复用控件时提交旧凭据。
+            if (_rdpPasswordWasSet)
+            {
+                ((IMsRdpClientNonScriptable)activeX).ResetPassword();
+                _rdpPasswordWasSet = false;
+            }
+            SetComProperty(activeX, "UserName", string.Empty);
+            SetComProperty(activeX, "Domain", string.Empty);
+            VerifyStringProperty(activeX, "UserName", string.Empty);
+            VerifyStringProperty(activeX, "Domain", string.Empty);
+            _rdpIdentityWasSet = false;
+            return;
+        }
+
+        _rdpIdentityWasSet = true;
         SetComProperty(activeX, "UserName", credentials.UserName);
         SetComProperty(activeX, "Domain", credentials.Domain);
 

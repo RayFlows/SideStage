@@ -6,9 +6,13 @@
     不关闭其他应用、不更改真实 SideStage；仅在明确匹配本轮标识后卸载。
 .PARAMETER ElevatedHost
     用 Windows 的管理员授权启动一次隔离宿主，验证从已授权窗口直接交接至当前用户安装器。
+.PARAMETER RequestAdministratorOnRestart
+    在本轮专属注册表项开启启动授权，要求更新后实际执行窗口逻辑的进程具有管理员权限。
+.PARAMETER VerifyRestartConsent
+    交互验收 Windows 授权结果。点「是」须取得管理员权限，点「否」须记录用户取消并打开普通窗口。
 #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][string] $Iscc, [switch] $ElevatedHost)
+param([Parameter(Mandatory)][string] $Iscc, [switch] $ElevatedHost, [switch] $RequestAdministratorOnRestart, [switch] $VerifyRestartConsent)
 $ErrorActionPreference = 'Stop'
 $root = (Get-Item -LiteralPath "$PSScriptRoot/../..").FullName
 $id = [guid]::NewGuid().ToString()
@@ -16,8 +20,9 @@ $run = Join-Path $root "artifacts/checks/handoff/$id"
 $payload = Join-Path $run 'payload'
 $dir = Join-Path $run 'installed'
 $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{$id}_is1"
+$preferenceKey = "HKCU:\Software\SideStage.Tests\$id"
 $compiler = (Get-Command $Iscc -CommandType Application).Source
-if ((Test-Path -LiteralPath $run) -or (Test-Path -LiteralPath $key)) { throw '隔离路径已占用。' }
+if ((Test-Path -LiteralPath $run) -or (Test-Path -LiteralPath $key) -or (Test-Path -LiteralPath $preferenceKey)) { throw '隔离路径已占用。' }
 $null = New-Item -ItemType Directory -Path $payload
 & dotnet publish (Join-Path $root 'tests/UpdaterFixture') -c Release -r win-x64 --self-contained false -o $payload
 if ($LASTEXITCODE) { throw '验收宿主编译失败。' }
@@ -65,11 +70,14 @@ foreach ($v in '1.0.0','1.1.0') {
     if ($LASTEXITCODE) { throw '验收安装包编译失败。' }
 }
 try {
+    $null = New-Item -Path $preferenceKey -Force
+    $ask = $RequestAdministratorOnRestart -or $VerifyRestartConsent
+    $null = New-ItemProperty -LiteralPath $preferenceKey -Name 'RequestAdministratorOnStartup' -PropertyType DWord -Value ([int]$ask)
     $first = Start-Process -FilePath "$run/SideStage-1.0.0-Setup-x64.exe" -ArgumentList "/VERYSILENT /NORESTART /SP- /DIR=`"$dir`"" -Wait -PassThru -WindowStyle Hidden
     if ($first.ExitCode -ne 0 -or (Get-ItemProperty -LiteralPath $key).InstallLocation.TrimEnd('\') -ne $dir) { throw '隔离安装未成功。' }
     $next = "$run/SideStage-1.1.0-Setup-x64.exe"
     $hash = (Get-FileHash -LiteralPath $next).Hash.ToLowerInvariant()
-    foreach ($action in 'cancel','install') {
+    foreach ($action in 'busy','cancel','install') {
         $mode = @{}
         $arguments = "$action `"$next`" $hash"
         if ($ElevatedHost -and $action -eq 'install') {
@@ -78,10 +86,10 @@ try {
         }
         $hostRun = Start-Process -FilePath "$dir/SideStage.exe" -ArgumentList $arguments @mode -Wait -PassThru -WindowStyle Hidden
         if ($hostRun.ExitCode -ne 0) { throw "交接失败：$action" }
-        $expected = if ($action -eq 'cancel') { '1.0.0' } else { '1.1.0' }
+        $expected = if ($action -eq 'install') { '1.1.0' } else { '1.0.0' }
         # 通过 UAC 启动宿主时，父测试进程只能直接等待宿主，安装完成由新版的实际启动标记确认。
         if ($action -eq 'install') {
-            $deadline = [DateTime]::UtcNow.AddSeconds(60)
+            $deadline = [DateTime]::UtcNow.AddSeconds($(if ($ask) { 180 } else { 60 }))
             while (!(Test-Path -LiteralPath "$dir/restarted.txt") -and [DateTime]::UtcNow -lt $deadline) {
                 Start-Sleep -Milliseconds 100
             }
@@ -92,9 +100,20 @@ try {
         if ($action -eq 'install' -and !(Select-String -LiteralPath "$run/install.log" -SimpleMatch -Quiet 'SideStage fixture: visible install progress')) {
             throw '实际写入期间没有观察到带正确标题和配色的可见安装进度。'
         }
+        if ($action -eq 'install') {
+            $wanted = if ($ask) { 'administrator' } else { 'standard' }
+            $actual = Get-Content -Raw -LiteralPath "$dir/restarted.txt"
+            if ($VerifyRestartConsent -and $actual -eq 'standard' -and (Test-Path -LiteralPath "$dir/authorization.txt")) {
+                $notice = Get-Content -Raw -LiteralPath "$dir/authorization.txt"
+                if ($notice -like '已取消 Windows 管理员授权*') { $wanted = 'standard'; Write-Output $notice }
+            }
+            if ($actual -ne $wanted) { throw "重启窗口的权限不符合偏好，预期 $wanted，实际 $actual。" }
+            Write-Output "重启窗口的权限符合偏好 ($actual)。"
+        }
         Write-Output "$action 通过：安装记录、文件内容和重启状态均符合预期。"
     }
 } finally {
+    if (Test-Path -LiteralPath $preferenceKey) { Remove-Item -LiteralPath $preferenceKey }
     if (Test-Path -LiteralPath $key) {
         $item = Get-ItemProperty -LiteralPath $key
         $uninstall = [IO.Path]::GetFullPath($item.UninstallString.Trim('"'))

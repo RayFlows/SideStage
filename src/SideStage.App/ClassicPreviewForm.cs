@@ -46,6 +46,7 @@ internal sealed class ClassicPreviewForm : Form
     private readonly WindowsChildSessionTerminator _sessionTerminator = new();
     private readonly WindowsChildSessionCredentialStore _credentialStore = new();
     private readonly PreviewPreferences _previewPreferences;
+    private readonly CredentialConnectionGuide _credentialGuide;
     private readonly ChildSessionPreviewPanel _previewPanel;
     private readonly ThemedButton _connectButton = new();
     private readonly ThemedButton _credentialButton = new();
@@ -82,6 +83,7 @@ internal sealed class ClassicPreviewForm : Form
     public ClassicPreviewForm(string preferenceKey = StartupElevation.SettingsKey)
     {
         _previewPreferences = new(preferenceKey);
+        _credentialGuide = new(preferenceKey);
         _previewPanel = new(_previewPreferences.Display, _previewPreferences.Audio);
         Program.ApplyIdentity(this);
         BackColor = WindowColor;
@@ -868,20 +870,17 @@ internal sealed class ClassicPreviewForm : Form
             }
             else
             {
-                using CredentialInputDialog dialog = new(_credentialStore);
-                if (dialog.ShowDialog(this) != DialogResult.OK
-                    || dialog.Credentials is not { } credentials)
+                var choice = _credentialGuide.Choose(() => CredentialReminderDialog.Ask(this), AppendLog);
+                if (choice == CredentialChoice.Cancel) return;
+                if (choice == CredentialChoice.Direct)
                 {
-                    return;
+                    _previewPanel.PreviewControl.ConnectPreview();
+                    AppendLog("已请求沿用当前 Windows 登录身份连接子会话。");
                 }
-
-                // ConnectPreview 会在返回前把凭据交给 ActiveX；SecureString 随即释放。
-                using (credentials)
+                else
                 {
-                    _previewPanel.PreviewControl.ConnectPreview(credentials);
+                    ManageCredentials(sender, eventArgs);
                 }
-
-                AppendLog("已使用本次输入的登录凭据发出子会话预览连接请求。");
             }
         }
         catch (Exception exception) when (IsDisplayableOperationFailure(exception))
@@ -902,11 +901,9 @@ internal sealed class ClassicPreviewForm : Form
     {
         try
         {
-            using CredentialInputDialog dialog = new(_credentialStore, requirePersistentSave: true);
-            if (dialog.ShowDialog(this) == DialogResult.OK
-                && dialog.Credentials is { } credentials)
+            using CredentialInputDialog dialog = new(_credentialStore);
+            if (dialog.ShowDialog(this) == DialogResult.OK)
             {
-                credentials.Dispose();
                 AppendLog("已更新本机 Windows 凭据管理器中的子会话登录项。");
             }
         }
@@ -951,15 +948,7 @@ internal sealed class ClassicPreviewForm : Form
     /// <param name="eventArgs">按钮事件参数。</param>
     private void LogoffChildSession(object? sender, EventArgs eventArgs)
     {
-        DialogResult confirmation = MessageBox.Show(
-            this,
-            "注销会结束子会话中的所有程序和未保存工作。此操作不可撤销。\r\n\r\n确定继续吗？",
-            "确认注销子会话",
-            MessageBoxButtons.YesNo,
-            MessageBoxIcon.Warning,
-            MessageBoxDefaultButton.Button2);
-
-        if (confirmation != DialogResult.Yes)
+        if (!PaperDialog.Confirm(this, "注销子会话？", "子会话中的程序将全部结束，未保存的工作会丢失。", "注销子会话"))
         {
             return;
         }
@@ -1213,8 +1202,9 @@ internal sealed class ClassicPreviewForm : Form
     /// 将一条带本地时间戳的诊断记录追加到窗口日志。
     /// </summary>
     /// <param name="message">不包含密码或令牌的诊断信息。</param>
-    private void AppendLog(string message)
+    internal void AppendLog(string message)
     {
+        if (_eventLog.Items.Count == ActivityLogStore.VisibleEntries) _eventLog.Items.RemoveAt(0);
         _eventLog.Items.Add($"[{DateTimeOffset.Now:HH:mm:ss}] {message}");
         _eventLog.TopIndex = Math.Max(0, _eventLog.Items.Count - 1);
     }
@@ -1226,12 +1216,7 @@ internal sealed class ClassicPreviewForm : Form
     /// <param name="exception">操作失败异常。</param>
     private void ShowOperationError(string title, Exception exception)
     {
-        MessageBox.Show(
-            this,
-            exception.Message,
-            title,
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Error);
+        PaperDialog.Tell(this, title, exception.Message, error: true);
     }
 
     /// <summary>

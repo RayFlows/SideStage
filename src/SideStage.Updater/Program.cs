@@ -21,6 +21,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         bool committed = false;
+        bool installed = false;
         try
         {
             if (args is not [var pid, var pipeName] || !int.TryParse(pid, CultureInfo.InvariantCulture, out int id) ||
@@ -63,12 +64,22 @@ internal static class Program
             using var setup = Process.Start(start) ?? throw new IOException("无法启动安装器。");
             setup.WaitForExit();
             if (setup.ExitCode != 0) throw new IOException($"安装未完成（退出码 {setup.ExitCode}）。请查看：\n{log}");
-            using var restarted = Process.Start(new ProcessStartInfo(app) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(app)! });
+            installed = true;
+            // 新版入口会领取安装器留下的一次性桌面启动请求；旧版更新器也能以相同方式交接。
+            using var restarted = Process.Start(new ProcessStartInfo(app) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(app)! })
+                ?? throw new IOException("Windows 没有接受启动请求。");
             return 0;
         }
         catch (Exception ex)
         {
-            if (committed) MessageBox(0, ex.Message, "SideStage 更新未完成", 0x10);
+            if (installed)
+            {
+                // 原窗口已经退出，将启动失败原因保存在本次更新目录，方便从安装日志旁找到。
+                try { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "restart-error.log"), ex.Message); }
+                catch (Exception writeError) when (writeError is IOException or UnauthorizedAccessException) { }
+                MessageBox(0, $"新版已安装。请从开始菜单打开 SideStage。\n\n{ex.Message}", "SideStage 未能自动重启", 0x30);
+            }
+            else if (committed) MessageBox(0, ex.Message, "SideStage 更新未完成", 0x10);
             return 1;
         }
     }

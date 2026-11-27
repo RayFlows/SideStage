@@ -11,7 +11,10 @@ internal sealed class ActivityLogInfoButton : PaperInfoButton
 {
     /// <summary>在日志标题旁显示本机活动记录的说明和目录链接。</summary>
     internal ActivityLogInfoButton(Font iconFont, Font bodyFont, Action openDirectory)
-        : base(iconFont, bodyFont, "活动日志说明", $"{Program.DisplayName} 的活动记录", "打开完整日志文件夹", openDirectory) { }
+        : base(iconFont, bodyFont, "活动日志说明",
+            $"这里显示最近 {ActivityLogStore.VisibleEntries} 条记录。文件保留 {ActivityLogStore.RetentionDays} 天，" +
+            $"超过 {ActivityLogStore.TotalBytes / (1024 * 1024)} MiB 或 {ActivityLogStore.MaxFiles} 个文件时优先清理最早的记录。",
+            "打开完整日志文件夹", openDirectory) { }
 }
 
 /// <summary>设置和日志共用的信息入口，保留一致的边缘、键盘和悬停行为。</summary>

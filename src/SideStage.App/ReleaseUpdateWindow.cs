@@ -20,8 +20,9 @@ internal sealed class ReleaseUpdateWindow : Form
     private readonly ReleaseProgressBar _progress = new() { Dock = DockStyle.Fill, Height = 8, Visible = false,
         AccessibleName = "更新下载进度" };
     private readonly Label _status = new() { AutoSize = true, Dock = DockStyle.Fill, UseMnemonic = false };
-    private readonly PaperCommandButton _primary = Command("下载更新", true), _later = Command("稍后"),
-        _skip = Command("跳过此版本"), _cancel = Command("取消下载");
+    private readonly PaperCommandButton _primary = PaperCommandButton.DialogAction("下载更新", true),
+        _later = PaperCommandButton.DialogAction("稍后"), _skip = PaperCommandButton.DialogAction("跳过此版本"),
+        _cancel = PaperCommandButton.DialogAction("取消下载");
     private readonly Font _body = TheatreTypography.Create(10), _heading = TheatreTypography.Create(16, FontStyle.Bold);
     private readonly Font _section = TheatreTypography.Create(11, FontStyle.Bold), _hint = TheatreTypography.Create(9);
     private CancellationTokenSource? _transfer;
@@ -99,14 +100,6 @@ internal sealed class ReleaseUpdateWindow : Form
             option.Size = new(inline ? (hasNext ? cell : width - i * (cell + gap)) : width, option.GetPreferredSize(Size.Empty).Height);
         }
     }
-
-    /// <summary>共用应用按钮及悬停反馈，宽度跟随标签而非裁切长命令。</summary>
-    private static PaperCommandButton Command(string text, bool accent = false) => new()
-    {
-        Text = text, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new(9, 4, 9, 4),
-        Margin = new(4, 3, 0, 3), FaceColor = accent ? PaperFieldSurface.Brass : PaperFieldSurface.Hover,
-        ForeColor = accent ? Color.White : PaperFieldSurface.Ink
-    };
 
     /// <summary>构建按文字高度排版的标题和版本行，为发布说明保留剩余空间。</summary>
     private static Label Caption(string text, Font font, int above = 0) => new()

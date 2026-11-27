@@ -79,7 +79,6 @@ internal sealed partial class ParchmentPreviewForm
         string message = target is { } id
             ? $"注销子会话 {id.Value} 并关闭窗口？\r\n\r\n子会话中的程序将全部结束，未保存的工作会丢失。"
             : "当前连接尚无可核验的注销目标。仅断开连接并关闭窗口，保留子会话？";
-        return MessageBox.Show(this, message, $"关闭 {Program.DisplayName}", MessageBoxButtons.YesNo,
-            MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+        return PaperDialog.Confirm(this, $"关闭 {Program.DisplayName}", message, target.HasValue ? "注销并关闭" : "断开并关闭");
     }
 }

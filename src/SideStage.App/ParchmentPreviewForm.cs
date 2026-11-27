@@ -37,10 +37,14 @@ internal sealed partial class ParchmentPreviewForm : Form
     // ── 服务 ─────────────────────────────────────────────────────────────
     private readonly ISessionInspector _sessionInspector;
     private readonly Func<Task> _enableChildSessions;
-    private readonly Action<WindowsChildSessionCredentials> _requestPreviewConnection;
+    private readonly Action<WindowsChildSessionCredentials?> _requestPreviewConnection;
+    private readonly CredentialConnectionGuide _credentialGuide;
+    private readonly Func<(CredentialChoice Choice, bool Remember)> _askLoginMethod;
     private readonly WindowsChildSessionTerminator _sessionTerminator = new();
     private readonly WindowsChildSessionCredentialStore _credentialStore;
-    private readonly string _logDirectory, _logFile;
+    private readonly string _logDirectory;
+    private readonly ActivityLogStore _activityLog;
+    private readonly System.Windows.Forms.Timer _logMaintenance = new() { Interval = 60 * 60 * 1000 };
     private readonly Action<string> _openFolder;
     private bool _logWriteFailed;
     private readonly PreviewPreferences _previewPreferences;
@@ -79,7 +83,7 @@ internal sealed partial class ParchmentPreviewForm : Form
     private ComboBox?        _scalingModeSelector;
     private CheckBox?        _preserveAspectRatioToggle;
     private CheckBox?        _muteAudioToggle;
-    private RichTextBox?     _eventLog;
+    private ActivityLogView? _eventLog;
     private SettingsGear?    _gear;
     private bool _canDisconnect;
     private bool _canLogoff;
@@ -106,8 +110,8 @@ internal sealed partial class ParchmentPreviewForm : Form
     internal ParchmentPreviewForm(WindowsChildSessionCredentialStore credentialStore, string? logDirectory = null,
         Action<string>? openFolder = null, bool pollSessions = true, ISessionInspector? sessionInspector = null,
         Func<Task>? enableChildSessions = null, ReleaseUpdateFeed? updateFeed = null, string updatePreferenceKey = UpdatePreferenceKey,
-        Action<WindowsChildSessionCredentials>? requestPreviewConnection = null,
-        StartupInventory? startupInventory = null)
+        Action<WindowsChildSessionCredentials?>? requestPreviewConnection = null,
+        StartupInventory? startupInventory = null, Func<(CredentialChoice Choice, bool Remember)>? askLoginMethod = null)
     {
         _updates = updateFeed ?? ReleaseUpdateFeed.FromBuild();
         _updatePreferenceKey = updatePreferenceKey;
@@ -122,10 +126,14 @@ internal sealed partial class ParchmentPreviewForm : Form
         _enableChildSessions = enableChildSessions ?? ChildSessionEnableCommand.EnableAsync;
         _requestPreviewConnection = requestPreviewConnection ?? _previewPanel.PreviewControl.ConnectPreview;
         _credentialStore = credentialStore;
+        _credentialGuide = new(updatePreferenceKey);
+        _askLoginMethod = askLoginMethod ?? (() => CredentialReminderDialog.Ask(this));
         // 沿用首版日志目录，保证升级前后的「打开日志文件夹」指向同一段历史。
         _logDirectory = logDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "WinChildDesk", "Logs");
-        _logFile = Path.Combine(_logDirectory, $"preview-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
+        _activityLog = new(_logDirectory);
+        _logMaintenance.Tick += (_, _) => _activityLog.Maintain(DateTime.UtcNow);
+        _logMaintenance.Start();
         _openFolder = openFolder ?? OpenFolderInExplorer;
         Program.ApplyIdentity(this);
         BackColor = BronzeWindowFrame.OuterInk;
@@ -628,7 +636,7 @@ internal sealed partial class ParchmentPreviewForm : Form
         return new Rectangle(area.Width - width, 0, width, area.Height);
     }
 
-    /// <summary>读取已保存的凭据或打开输入页。准备好凭据后再收起侧栏并请求连接。</summary>
+    /// <summary>优先使用已保存的凭据。需要配置时转到高级设置的登录凭据页，由用户另行发起连接。</summary>
     private void ConnectPreview(object? sender, EventArgs e)
     {
         try
@@ -636,7 +644,15 @@ internal sealed partial class ParchmentPreviewForm : Form
             using WindowsChildSessionCredentials? saved = _credentialStore.Read();
             if (saved is null)
             {
-                OpenCredentialPage(connectAfterSubmit: true, hasSavedCredentials: false);
+                switch (_credentialGuide.Choose(_askLoginMethod, message => AppendLog(message, LogLevel.Warning)))
+                {
+                    case CredentialChoice.Configure:
+                        ManageCredentials(sender, e);
+                        break;
+                    case CredentialChoice.Direct:
+                        StartPreviewConnection(null, "已请求沿用当前 Windows 登录身份连接子会话。");
+                        break;
+                }
                 return;
             }
             StartPreviewConnection(saved, "已使用本机保存的登录凭据请求连接子会话。");
@@ -649,7 +665,7 @@ internal sealed partial class ParchmentPreviewForm : Form
     }
 
     /// <summary>先完成侧栏收起和首页重绘，再调用 RDP。错误由主窗口呈现，此时凭据编辑页已释放。</summary>
-    private void StartPreviewConnection(WindowsChildSessionCredentials credentials, string logMessage)
+    private void StartPreviewConnection(WindowsChildSessionCredentials? credentials, string logMessage)
     {
         if (_settingsDrawer?.Visible == true)
         {
@@ -665,12 +681,12 @@ internal sealed partial class ParchmentPreviewForm : Form
         RefreshSessionStatus();
     }
 
-    /// <summary>从设置行打开凭据编辑页，已有本机保存项时提供删除入口。</summary>
+    /// <summary>首页、连接提醒与设置行共用此入口。页面已经打开时保留用户正在填写的草稿。</summary>
     private void ManageCredentials(object? sender, EventArgs e)
     {
         try
         {
-            OpenCredentialPage(connectAfterSubmit: false, _credentialStore.HasSavedCredentials());
+            if (_editor is not { Visible: true }) OpenCredentialPage(_credentialStore.HasSavedCredentials());
         }
         catch (Exception ex) when (IsDisplayable(ex))
         {
@@ -678,25 +694,17 @@ internal sealed partial class ParchmentPreviewForm : Form
         }
     }
 
-    /// <summary>在同一侧栏切换到输入页，由打开入口决定是仅保存还是提交给本机 RDP。</summary>
-    private void OpenCredentialPage(bool connectAfterSubmit, bool hasSavedCredentials)
+    /// <summary>在设置侧栏管理当前用户的凭据，保存成功后返回高级设置。</summary>
+    private void OpenCredentialPage(bool hasSavedCredentials)
     {
         if (_settingsDrawer is null || _drawerPages is null) return;
         if (!_settingsDrawer.Visible) ToggleSettings(this, EventArgs.Empty);
         LeaveDrawerPage();
-        _editor = new InlineCredentialEditor(_bodyFont, _labelFont, connectAfterSubmit, hasSavedCredentials,
-            (credentials, persist) =>
+        _editor = new InlineCredentialEditor(_bodyFont, _labelFont, hasSavedCredentials,
+            credentials =>
             {
-                if (persist)
-                {
-                    _credentialStore.Save(credentials);
-                    RefreshCredentialCheck();
-                }
-                if (connectAfterSubmit)
-                {
-                    StartPreviewConnection(credentials, "已发出 RDP 连接请求。");
-                    return;
-                }
+                _credentialStore.Save(credentials);
+                RefreshCredentialCheck();
                 AppendLog("已更新本机登录凭据。");
                 LeaveDrawerPage();
                 RefreshSessionStatus();
@@ -764,9 +772,8 @@ internal sealed partial class ParchmentPreviewForm : Form
             if (_previewPanel.PreviewControl.GetConnectionState() != RdpPreviewConnectionState.Disconnected &&
                 _previewPanel.PreviewControl.VerifiedConnectionTarget != child.Id)
                 throw new InvalidOperationException("连接的子会话已变化，请重新核对。");
-            if (MessageBox.Show(this, $"注销子会话 {child.Id.Value}？子会话中的程序将全部结束，未保存的工作会丢失。",
-                "确认注销子会话", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
-                MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+            if (!PaperDialog.Confirm(this, $"注销子会话 {child.Id.Value}？",
+                "子会话中的程序将全部结束，未保存的工作会丢失。", "注销子会话")) return;
             _audioReconnect.Cancel();
             CancelParentRecovery();
             _sessionTerminator.LogoffCurrentChildSession(child.Id);
@@ -1176,11 +1183,10 @@ internal sealed partial class ParchmentPreviewForm : Form
         string line = $"[{now:HH:mm:ss}] {level.ToString().ToUpperInvariant()}  {message}";
         try
         {
-            Directory.CreateDirectory(_logDirectory);
-            File.AppendAllText(_logFile, line + Environment.NewLine);
+            _activityLog.Append(line, now.ToUniversalTime());
             _logWriteFailed = false;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ActivityLogStore.IsFileError(ex))
         {
             if (!_logWriteFailed) AppendLogLine($"[{now:HH:mm:ss}] WARNING  本机日志写入失败：{ex.Message}", LogLevel.Warning);
             _logWriteFailed = true;
@@ -1188,21 +1194,15 @@ internal sealed partial class ParchmentPreviewForm : Form
         AppendLogLine(line, level);
     }
 
-    /// <summary>将一行带颜色的文字附到末尾。读者正在选择文本时恢复选区，方便继续复制。</summary>
+    /// <summary>按严重程度选择纸面主题颜色，交给日志控件维护可复制的最近记录。</summary>
     private void AppendLogLine(string line, LogLevel level)
     {
-        if (_eventLog == null) return;
-        int start = _eventLog.SelectionStart, length = _eventLog.SelectionLength;
-        _eventLog.Select(_eventLog.TextLength, 0);
-        _eventLog.SelectionColor = level switch
+        _eventLog?.AppendEntry(line, level switch
         {
             LogLevel.Warning => Color.FromArgb(131, 81, 16),
             LogLevel.Error => Color.FromArgb(153, 46, 40),
             _ => Color.FromArgb(43, 86, 86),
-        };
-        _eventLog.SelectedText = line + "\n";
-        if (length > 0) _eventLog.Select(start, length);
-        else _eventLog.ScrollToCaret();
+        });
     }
 
     /// <summary>通过系统文件管理器打开当前应用实际写入的日志目录，失败时在日志窗口给出提示。</summary>
@@ -1229,7 +1229,7 @@ internal sealed partial class ParchmentPreviewForm : Form
     private void ShowError(string title, Exception ex)
     {
         AppendLog($"{title}：{ex.Message}", LogLevel.Error);
-        MessageBox.Show(this, ex.Message, title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        PaperDialog.Tell(this, title, ex.Message, error: true);
     }
 
     private static bool IsDisplayable(Exception ex) =>

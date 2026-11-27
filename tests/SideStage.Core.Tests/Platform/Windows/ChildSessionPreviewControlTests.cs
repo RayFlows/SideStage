@@ -89,6 +89,22 @@ public sealed class ChildSessionPreviewControlTests
         Assert.AreEqual(RdpPreviewConnectionState.Disconnected, control.GetConnectionState());
     }
 
+    /// <summary>模拟同一控件用过显式凭据后改为直接连接，确认旧账户和域均从真实 ActiveX 移除。</summary>
+    [STATestMethod]
+    public void DirectConnectionAfterExplicitCredentialsClearsPreviousIdentity()
+    {
+        using ChildSessionPreviewControl control = new();
+        control.PreparePreview();
+        object activeX = InvokePrivateMethod(control, "GetActiveXOrThrow")!;
+        using var password = CreateSecureString("Fixture-only");
+        using var credentials = new WindowsChildSessionCredentials("FixtureUser", "FixtureDomain", password);
+        InvokePrivateMethod(control, "ConfigureLogonCredentials", activeX, credentials);
+        InvokePrivateMethod(control, "ConfigureLogonCredentials", activeX, null!);
+        Assert.AreEqual("", InvokeStaticPrivateMethod(control, "GetComProperty", activeX, "UserName"));
+        Assert.AreEqual("", InvokeStaticPrivateMethod(control, "GetComProperty", activeX, "Domain"));
+        Assert.AreEqual(RdpPreviewConnectionState.Disconnected, control.GetConnectionState());
+    }
+
     /// <summary>
     /// 验证调用方可显式选择把子会话声音转发到本机，而不发起连接。
     /// </summary>

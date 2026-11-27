@@ -1,6 +1,6 @@
 /*
  * 文件名称：InlineCredentialEditor.cs
- * 文件职责：在设置侧栏内编辑 Windows 登录凭据，支持连接、保存以及确认删除本机保存项。
+ * 文件职责：在设置侧栏内编辑、保存和删除当前 Windows 用户的子会话登录凭据。
  * 生命周期：打开时预填当前 Windows 账户名，密码留空。已保存标志决定删除入口是否可见。
  * 输入边界：错误提示在页内显示；离开页面、成功提交或删除后清理密码输入框。
  */
@@ -14,20 +14,19 @@ internal sealed class InlineCredentialEditor : PaperScrollPage
     private readonly TextBox _account = new() { Text = Environment.UserName };
     private readonly TextBox _password = new(), _domain = new();
     private readonly SettingsSwitch _advanced;
-    private readonly SettingsSwitch? _remember;
     private readonly SettingsCaption _feedback = new();
-    private readonly Action<WindowsChildSessionCredentials, bool> _submit;
+    private readonly Action<WindowsChildSessionCredentials> _save;
     private readonly Action _delete;
     private readonly SettingsActionRow _remove;
     private readonly FlowLayoutPanel _confirm = new();
 
-    /// <summary>按入口建立表单。管理页提供保存和删除，连接页允许选择是否记住本次输入。</summary>
-    internal InlineCredentialEditor(Font font, Font smallFont, bool connecting, bool hasSavedCredentials,
-        Action<WindowsChildSessionCredentials, bool> submit, Action delete)
+    /// <summary>建立登录凭据设置页。所有入口都提供相同的保存操作，存在保存项时开放删除。</summary>
+    internal InlineCredentialEditor(Font font, Font smallFont, bool hasSavedCredentials,
+        Action<WindowsChildSessionCredentials> save, Action delete)
     {
         Font = font;
         Dock = DockStyle.Fill;
-        _submit = submit;
+        _save = save;
         _delete = delete;
         TableLayoutPanel stack = new() { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1 };
@@ -44,17 +43,12 @@ internal sealed class InlineCredentialEditor : PaperScrollPage
         domainRow.Visible = _advanced.Checked;
         fields.AddRow(domainRow);
         _advanced.CheckedChanged += (_, _) => domainRow.Visible = _advanced.Checked;
-        if (connecting)
-        {
-            _remember = new SettingsSwitch("保存到本机", font) { Checked = true };
-            fields.AddRow(_remember);
-        }
-        stack.Controls.Add(SettingsCaption.Footnote(
-            "请使用 Windows 账户密码登录子会话。平时用 PIN 登录 Windows 的用户，也请在这里填写账户密码。保存后，下次连接可自动登录。凭据仅保存在本机 Windows 凭据管理器，不会上传。", smallFont));
+        string note = "请使用 Windows 账户密码登录子会话。平时用 PIN 登录 Windows 的用户，也请在这里填写账户密码。保存后，下次连接可自动登录。凭据仅保存在本机 Windows 凭据管理器，不会上传。";
+        stack.Controls.Add(SettingsCaption.Footnote(note, smallFont));
 
         var actions = new SettingsList(13, 2);
         stack.Controls.Add(actions);
-        actions.AddRow(new SettingsActionRow(connecting ? "连接" : "保存凭据", font, Submit));
+        actions.AddRow(new SettingsActionRow("保存凭据", font, Submit));
         _remove = new SettingsActionRow("删除已保存的凭据", font, (_, _) => SetConfirmation(true))
             { Visible = hasSavedCredentials, ForeColor = Color.FromArgb(137, 65, 52) };
         actions.AddRow(_remove);
@@ -125,7 +119,7 @@ internal sealed class InlineCredentialEditor : PaperScrollPage
         catch (Win32Exception ex) { _feedback.Text = ex.Message; }
     }
 
-    /// <summary>校验输入并按打开页面时的意图提交。回调只能在调用期间使用凭据。</summary>
+    /// <summary>校验账户和密码后保存，回调返回时释放本次输入的凭据。</summary>
     private void Submit(object? sender, EventArgs e)
     {
         if (_confirm.Visible) return;
@@ -134,7 +128,7 @@ internal sealed class InlineCredentialEditor : PaperScrollPage
         try
         {
             using var credentials = CredentialInputDialog.ReadFields(_account, _advanced.Checked ? _domain.Text : "", _password);
-            _submit(credentials, _remember?.Checked ?? true);
+            _save(credentials);
         }
         catch (Exception ex) when (ex is ArgumentException or Win32Exception or InvalidOperationException or InvalidDataException
             or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
