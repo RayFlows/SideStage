@@ -14,7 +14,7 @@ namespace ChildSessionCheck;
 internal static class Program
 {
     /// <summary>在 STA 消息循环中运行验收，独立测试进程模式仅显示一个固定图案窗口。</summary>
-    /// <param name="args">--run 启动验收，--sample 由分身启动器调用。</param>
+    /// <param name="args">--run 启动验收，--sample 由子会话启动器调用。</param>
     /// <returns>全部检查通过为零，失败为一。</returns>
     [STAThread]
     public static int Main(string[] args)
@@ -58,7 +58,7 @@ internal static class Program
             }
         }
 
-        using Form host = new() { Text = "桌面分身 · 本机验收", ClientSize = new Size(800, 450) };
+        using Form host = new() { Text = "SideStage · 本机验收", ClientSize = new Size(800, 450) };
         using ChildSessionPreviewControl preview = new();
         host.Controls.Add(preview);
         int result = 1;
@@ -85,7 +85,7 @@ internal static class Program
     /// <summary>核对创建、进程归属、断开和重连；按创建时保存的句柄回收测试程序。</summary>
     /// <param name="inspector">只读会话观察器。</param>
     /// <param name="preview">当前消息循环承载的预览控件。</param>
-    /// <param name="expected">重连接受的测试分身编号；新建时为空。</param>
+    /// <param name="expected">重连接受的测试子会话编号；新建时为空。</param>
     private static async Task CheckAsync(WindowsSessionInspector inspector, ChildSessionPreviewControl preview, SessionId? expected)
     {
         Console.WriteLine($"parent={inspector.GetCurrentSession().Id}");
@@ -94,8 +94,8 @@ internal static class Program
         await CheckInSessionAsync(child.Id, preview);
     }
 
-    /// <summary>在指定分身运行示例，核验像素并回收进程。仅在验收程序持有预览时测试其重连。</summary>
-    /// <param name="session">启动时必须由库重新核验为活动且已解锁的分身编号。</param>
+    /// <summary>在指定子会话运行示例，核验像素并回收进程。仅在验收程序持有预览时测试其重连。</summary>
+    /// <param name="session">启动时必须由库重新核验为活动且已解锁的子会话编号。</param>
     /// <param name="preview">验收程序拥有的连接，沿用外部预览时为空。</param>
     private static async Task CheckInSessionAsync(SessionId session, ChildSessionPreviewControl? preview)
     {
@@ -139,8 +139,8 @@ internal static class Program
     }
 
     /// <summary>
-    /// 等到分身本身绘出示例窗口。跨登录会话的 WaitForInputIdle 不能证明窗口可见，
-    /// 因此以真实分身截图中的已知像素作为就绪信号，并限制等待时间。
+    /// 等到子会话本身绘出示例窗口。跨登录会话的 WaitForInputIdle 不能证明窗口可见，
+    /// 因此以真实子会话截图中的已知像素作为就绪信号，并限制等待时间。
     /// </summary>
     /// <param name="session">此前核验的子会话编号。</param>
     /// <param name="color">示例窗口在该阶段应绘制的客户区颜色。</param>
@@ -156,13 +156,13 @@ internal static class Program
             }
             catch (ChildProcessLaunchException ex) when (ex.Stage == "CaptureDesktop")
             {
-                throw new InvalidOperationException($"分身取图拒绝：{ex.Message}（原生错误 {ex.NativeErrorCode}）。", ex);
+                throw new InvalidOperationException($"子会话取图拒绝：{ex.Message}（原生错误 {ex.NativeErrorCode}）。", ex);
             }
             using MemoryStream stream = new(png);
             using Bitmap frame = new(stream);
             if (frame.Size != new Size(1920, 1080))
             {
-                throw new InvalidDataException($"分身截图尺寸为 {frame.Width}x{frame.Height}，预期 1920x1080。");
+                throw new InvalidDataException($"子会话截图尺寸为 {frame.Width}x{frame.Height}，预期 1920x1080。");
             }
 
             if (frame.GetPixel(960, 540).ToArgb() == color.ToArgb())

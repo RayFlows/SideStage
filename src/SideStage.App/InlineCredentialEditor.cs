@@ -50,7 +50,7 @@ internal sealed class InlineCredentialEditor : PaperScrollPage
             fields.AddRow(_remember);
         }
         stack.Controls.Add(SettingsCaption.Footnote(
-            "分身用 Windows 账户密码登录，请填写账户密码而非 PIN。保存后，下次连接可自动登录。凭据仅保存在本机 Windows 凭据管理器，不会上传。", smallFont));
+            "请使用 Windows 账户密码登录子会话。平时用 PIN 登录 Windows 的用户，也请在这里填写账户密码。保存后，下次连接可自动登录。凭据仅保存在本机 Windows 凭据管理器，不会上传。", smallFont));
 
         var actions = new SettingsList(13, 2);
         stack.Controls.Add(actions);

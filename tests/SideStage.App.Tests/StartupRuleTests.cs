@@ -45,7 +45,7 @@ public sealed class StartupRuleTests
         if (Directory.Exists(Root)) Directory.Delete(Root, true);
     }
 
-    /// <summary>执行真正的登录代理，分别验证普通桌面、确认的分身、主窗口退出及原值恢复。</summary>
+    /// <summary>执行真正的登录代理，分别验证普通桌面、确认的子会话、主窗口退出及原值恢复。</summary>
     [TestMethod]
     public void GateRunsOnlyOutsideConfirmedChildAndRestoresOriginal()
     {
@@ -58,7 +58,7 @@ public sealed class StartupRuleTests
         using (var broker = new StartupSessionBroker(Gate, () => (uint)Process.GetCurrentProcess().SessionId))
         {
             Execute(wrapped);
-            Assert.IsFalse(File.Exists(Output), "确认分身时不应启动负载。");
+            Assert.IsFalse(File.Exists(Output), "确认子会话时不应启动负载。");
         }
         using (var broker = new StartupSessionBroker(Gate))
         {
@@ -361,7 +361,7 @@ public sealed class StartupRuleTests
         finally { Marshal.FinalReleaseComObject(service); }
     }
 
-    /// <summary>显式验收时在已确认的本机分身启动同一个临时任务，先验证放行输出，再验证父会话判定跳过。</summary>
+    /// <summary>显式验收时在已确认的本机子会话启动同一个临时任务，先验证放行输出，再验证父会话判定跳过。</summary>
     private void CheckExistingChild(dynamic folder, string name, int expected)
     {
         var inspector = new SideStage.Core.Platform.Windows.WindowsSessionInspector();
@@ -372,7 +372,7 @@ public sealed class StartupRuleTests
             File.Delete(Output);
             object first = registered.RunEx(null, 4, expected, null);
             Marshal.FinalReleaseComObject(first);
-            Assert.IsTrue(SpinWait.SpinUntil(() => File.Exists(Output) && (int)registered.State == 3, 12000), "分身放行对照未完成。");
+            Assert.IsTrue(SpinWait.SpinUntil(() => File.Exists(Output) && (int)registered.State == 3, 12000), "子会话放行对照未完成。");
             File.Delete(Output);
             using var observed = new ManualResetEventSlim();
             using var broker = new StartupSessionBroker(Gate, () =>
@@ -386,7 +386,7 @@ public sealed class StartupRuleTests
             Assert.IsTrue(observed.Wait(12000), "真实登录代理未联系父桌面。");
             Assert.IsTrue(SpinWait.SpinUntil(() => (int)registered.State == 3, 8000));
             Assert.AreEqual(0, (int)registered.LastTaskResult);
-            Assert.IsFalse(File.Exists(Output), "在实际分身中执行了应当跳过的负载。");
+            Assert.IsFalse(File.Exists(Output), "在实际子会话中执行了应当跳过的负载。");
         }
         finally { Marshal.FinalReleaseComObject(registered); }
     }

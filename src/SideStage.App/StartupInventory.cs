@@ -15,7 +15,7 @@ internal sealed record StartupScanPreferences(bool OnLaunch = false);
 /// <summary>Windows 对同一条运行中任务再次触发时的处理方式。未知表示未取得有效定义。</summary>
 internal enum StartupRepeatPolicy { Unknown, IgnoreNew, Parallel, Queue, StopExisting }
 
-/// <summary>一条登录登记的扫描结果。WindowsEnabled 表示系统登记状态，Blocked 表示分身规则。</summary>
+/// <summary>一条登录登记的扫描结果。WindowsEnabled 表示系统登记状态，Blocked 表示子会话规则。</summary>
 internal sealed record StartupEntry(string Source, string Name, string Detail, string? IconPath = null,
     string? Fingerprint = null, string? ReadOnlyReason = null, bool Blocked = false, string? DisplayName = null,
     bool? WindowsEnabled = null, StartupRepeatPolicy RepeatPolicy = StartupRepeatPolicy.Unknown, bool RequiresAdmin = false);

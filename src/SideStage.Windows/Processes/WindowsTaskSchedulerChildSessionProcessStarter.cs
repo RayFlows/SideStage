@@ -130,12 +130,12 @@ internal sealed class WindowsTaskSchedulerChildSessionProcessStarter
             captureResolution: resolution);
 
     /// <summary>
-    /// 把一次输入测试投递到指定分身。代理未能运行和 Windows 明确拒绝输入是两种结果，
+    /// 把一次输入测试投递到指定子会话。代理未能运行和 Windows 明确拒绝输入是两种结果，
     /// 只有后者能作为恢复父桌面的依据。
     /// </summary>
     internal Task<bool> ProbeInputAsync(SessionId target, CancellationToken token) =>
         ExchangeAsync(target, null, (_, response, _) => Task.FromResult(response.InputAccepted
-            ?? throw new InvalidDataException("分身代理没有返回输入测试结果。")), token, probeInput: true);
+            ?? throw new InvalidDataException("子会话代理没有返回输入测试结果。")), token, probeInput: true);
 
     /// <summary>在指定会话发起一次认证的操作。管道结束即通知代理回收尚未接管的进程。</summary>
     /// <typeparam name="T">调用完成后交付给宿主的结果类型。</typeparam>

@@ -1,5 +1,5 @@
 /*
- * 文件职责：协调两个预览窗口的音频切换。一次切换只断开一次，且只重连原分身。
+ * 文件职责：协调两个预览窗口的音频切换。一次切换只断开一次，且只重连原有子会话。
  * 生命周期：在界面线程接收用户操作和状态轮询，等待 ActiveX 与 Windows 会话均断开，
  *   再协商新音频模式。手动断开、关闭或注销可取消尚未发出的重连。
  */
@@ -59,17 +59,17 @@ internal sealed class AudioPreviewReconnect
         try
         {
             if (child is null || child.Id != _target)
-                throw new InvalidOperationException("原分身已结束或发生变化，已停止音频重连。");
+                throw new InvalidOperationException("原有子会话已结束或发生变化，已停止音频重连。");
             long now = Environment.TickCount64;
             var state = preview.GetConnectionState();
             if (_phase == Phase.WaitingForLogin && state == RdpPreviewConnectionState.Connected &&
                 child.IsDesktopReady && preview.VerifyConnectedChildSession().Id == _target)
             {
                 Cancel();
-                return "音频切换完成，已重新连接原分身。";
+                return "音频切换完成，已重新连接原有子会话。";
             }
             if (now - _started >= 30000)
-                throw new InvalidOperationException("等待分身切换声音超时，请检查登录界面或手动连接。");
+                throw new InvalidOperationException("等待子会话切换声音超时，请检查登录界面或手动连接。");
 
             if (_phase == Phase.WaitingForLogin)
             {
@@ -93,7 +93,7 @@ internal sealed class AudioPreviewReconnect
             _attempts++;
             _phase = Phase.WaitingForLogin;
             preview.ReconnectPreview(_target, saved);
-            return $"正在以新音频模式重连分身 {_target.Value}（第 {_attempts} 次）。";
+            return $"正在以新音频模式重连子会话 {_target.Value}（第 {_attempts} 次）。";
         }
         catch
         {

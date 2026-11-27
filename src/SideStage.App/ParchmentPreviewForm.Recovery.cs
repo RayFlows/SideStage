@@ -1,7 +1,7 @@
 /*
  * 文件名称：ParchmentPreviewForm.Recovery.cs
  * 文件职责：管理高级设置中的父桌面恢复开关、Windows 会话通知，以及单次恢复的生命周期。
- * 操作边界：只有本窗口连接过的分身可以参与恢复。主动锁屏、关闭分身连接、关闭开关都会解除待恢复目标。
+ * 操作边界：只有本窗口连接过的子会话可以参与恢复。主动锁屏、关闭子会话连接、关闭开关都会解除待恢复目标。
  */
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -17,7 +17,7 @@ internal sealed partial class ParchmentPreviewForm
     private const string RecoveryPreference = "RecoverDisconnectedParentToConsole";
     private const string RecoveryIssueUrl = "https://github.com/RayFlows/SideStage/issues/5";
     private const string RecoveryFooter = "如果您不知道这是在干什么，请保持开启按钮。";
-    private const string RecoveryNote = "远程桌面断开且分身输入失效时，尝试将主桌面接回空闲的本机控制台，再检查分身输入。接回后，本机显示器可能直接显示你的桌面。主动锁屏会保留锁定状态。此功能需要管理员权限。";
+    private const string RecoveryNote = "远程桌面断开且子会话输入失效时，尝试将主桌面接回空闲的本机控制台，再检查子会话输入。接回后，本机显示器可能直接显示你的桌面。主动锁屏会保留锁定状态。此功能需要管理员权限。";
     private const string RecoveryPrivilegeHint = "未获取管理员权限，无法启用";
     private readonly bool _watchSessionChanges;
     private readonly ParentDisconnectWatch _disconnectWatch = new();
@@ -151,7 +151,7 @@ internal sealed partial class ParchmentPreviewForm
         }
     }
 
-    /// <summary>每次断开只创建一个可取消的后台操作，返回 UI 线程后记录原分身编号和结果。</summary>
+    /// <summary>每次断开只创建一个可取消的后台操作，返回 UI 线程后记录原有子会话编号和结果。</summary>
     private async Task RecoverParentAsync(SessionId child)
     {
         using var lifetime = new CancellationTokenSource();
@@ -161,18 +161,18 @@ internal sealed partial class ParchmentPreviewForm
         {
             var result = await WindowsParentSessionRecovery.RecoverAsync(child, lifetime.Token);
             if (!lifetime.IsCancellationRequested && !IsDisposed)
-                AppendLog($"分身 {child.Value}：{result.Detail}", result.InputReady ? LogLevel.Info : LogLevel.Warning);
+                AppendLog($"子会话 {child.Value}：{result.Detail}", result.InputReady ? LogLevel.Info : LogLevel.Warning);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         catch (Exception ex)
         {
             if (!lifetime.IsCancellationRequested && !IsDisposed)
-                AppendLog($"分身 {child.Value} 未能自动接回主桌面：{ex.Message}", LogLevel.Warning);
+                AppendLog($"子会话 {child.Value} 未能自动接回主桌面：{ex.Message}", LogLevel.Warning);
         }
         finally { if (ReferenceEquals(_pendingRecovery, lifetime)) _pendingRecovery = null; }
     }
 
-    /// <summary>清除尚未消费的分身编号，并取消执行中的等待或复检。</summary>
+    /// <summary>清除尚未消费的子会话编号，并取消执行中的等待或复检。</summary>
     private void CancelParentRecovery()
     {
         _disconnectWatch.ClearTarget();
@@ -217,11 +217,11 @@ internal sealed class ParentDisconnectWatch
         return target;
     }
 
-    /// <summary>清除原分身绑定，下次活动状态采样后才能取得新的绑定。</summary>
+    /// <summary>清除原有子会话绑定，下次活动状态采样后才能取得新的绑定。</summary>
     internal void ClearTarget() => _child = null;
     /// <summary>锁屏立即丢弃目标，等待用户解锁。</summary>
     internal void OnLock() { _locked = true; ClearTarget(); }
-    /// <summary>解锁本身不授予恢复资格，仍需重新核验分身。</summary>
+    /// <summary>解锁本身不授予恢复资格，仍需重新核验子会话。</summary>
     internal void OnUnlock() => _locked = false;
     /// <summary>新的远程连接开始新的通知周期。</summary>
     internal void OnRemoteConnect() { _consumed = false; _locked = false; ClearTarget(); }

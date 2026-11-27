@@ -1,7 +1,7 @@
 /*
  * 文件名称：ChildProcessState.cs
  * 文件职责：
- *   定义桌面分身库对受管子会话进程的稳定生命周期状态。
+ *   定义子会话库对受管子会话进程的稳定生命周期状态。
  *
  * 设计边界：
  *   - 枚举只描述由本库成功启动并持有句柄的单个进程，不代表整个任务状态。
@@ -12,7 +12,7 @@
 namespace SideStage.Core.Processes;
 
 /// <summary>
-/// 表示一个由桌面分身库启动的进程的生命周期状态。
+/// 表示一个由子会话库启动的进程的生命周期状态。
 /// </summary>
 public enum ChildProcessState
 {

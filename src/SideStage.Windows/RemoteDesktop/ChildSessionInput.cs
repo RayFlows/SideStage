@@ -108,7 +108,7 @@ public sealed class ChildSessionInput
     {
         if (_previewControl.GetConnectionState() != RdpPreviewConnectionState.Connected)
         {
-            throw new InvalidOperationException("预览未连接，拒绝发送分身输入。");
+            throw new InvalidOperationException("预览未连接，拒绝发送子会话输入。");
         }
 
         _ = _previewControl.VerifyConnectedChildSession();

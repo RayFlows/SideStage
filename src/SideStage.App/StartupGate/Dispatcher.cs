@@ -54,7 +54,7 @@ namespace SideStage.StartupGate
         }
 
 #if STARTUP_GATE
-        /// <summary>只接受一个随机编号。先读回原入口，再在已确认的分身中跳过，其他会话照常运行。</summary>
+        /// <summary>只接受一个随机编号。先读回原入口，再在已确认的子会话中跳过，其他会话照常运行。</summary>
         [STAThread]
         private static int Main(string[] args)
         {

@@ -55,8 +55,8 @@ public sealed class WindowsSessionInspectorTests
     }
 
     /// <summary>
-    /// 重放本机出现的情况：Windows 已返回分身编号，扩展查询却返回 1733。
-    /// 宿主仍应能读取编号与诊断码，且不能据此认定分身已经解锁。
+    /// 重放本机出现的情况：Windows 已返回子会话编号，扩展查询却返回 1733。
+    /// 宿主仍应能读取编号与诊断码，且不能据此认定子会话已经解锁。
     /// </summary>
     [TestMethod]
     [DataRow(2, false)]

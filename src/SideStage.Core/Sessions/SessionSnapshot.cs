@@ -32,7 +32,7 @@ public sealed record SessionSnapshot(
 
     /// <summary>
     /// 已经确认连接目标后，宿主可据此呈现 Windows 的人工登录画面。
-    /// 在本机首次登录阶段，扩展查询可返回 1733，而基础查询只对等待登录的分身返回拒绝访问。
+    /// 在本机首次登录阶段，扩展查询可返回 1733，而基础查询只对等待登录的子会话返回拒绝访问。
     /// 此结果不能用于启动进程、发送自动输入或截图。
     /// </summary>
     internal bool CanPresentSignIn => ConnectionState switch

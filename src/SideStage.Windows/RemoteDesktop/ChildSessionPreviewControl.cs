@@ -65,7 +65,7 @@ public sealed class ChildSessionPreviewControl : AxHost
     public int? DisconnectReason { get; private set; }
 
     /// <summary>
-    /// 获取本控件使用的分身音频输出模式。
+    /// 获取本控件使用的子会话音频输出模式。
     /// </summary>
     public ChildSessionAudioMode AudioMode => _audioMode;
 
@@ -127,7 +127,7 @@ public sealed class ChildSessionPreviewControl : AxHost
     /// <summary>
     /// 设置下一次连接使用的音频输出模式。
     /// </summary>
-    /// <param name="audioMode">不播放分身声音，或将其转发到本机。</param>
+    /// <param name="audioMode">不播放子会话声音，或将其转发到本机。</param>
     /// <exception cref="ArgumentOutOfRangeException">指定了未支持的音频模式。</exception>
     /// <exception cref="InvalidOperationException">预览当前正在连接或已连接时抛出。</exception>
     public void SetAudioMode(ChildSessionAudioMode audioMode)
@@ -137,7 +137,7 @@ public sealed class ChildSessionPreviewControl : AxHost
 
         if (GetConnectionState() != RdpPreviewConnectionState.Disconnected)
         {
-            throw new InvalidOperationException("请先断开预览，再更改分身音频模式。");
+            throw new InvalidOperationException("请先断开预览，再更改子会话音频模式。");
         }
 
         if (_audioMode == audioMode)
@@ -154,10 +154,10 @@ public sealed class ChildSessionPreviewControl : AxHost
     }
 
     /// <summary>
-    /// 修改分身音频模式；若预览正在连接或已经连接，则先断开当前预览，
+    /// 修改子会话音频模式；若预览正在连接或已经连接，则先断开当前预览，
     /// 由调用方在控件变为 Disconnected 后重新发起连接。
     /// </summary>
-    /// <param name="audioMode">不播放分身声音，或将其转发到本机。</param>
+    /// <param name="audioMode">不播放子会话声音，或将其转发到本机。</param>
     /// <returns>当前预览需要重新连接时返回 true。</returns>
     /// <exception cref="ArgumentOutOfRangeException">指定了未支持的音频模式。</exception>
     /// <exception cref="InvalidOperationException">无法读取或断开当前预览连接时抛出。</exception>
@@ -184,7 +184,7 @@ public sealed class ChildSessionPreviewControl : AxHost
     }
 
     /// <summary>
-    /// 建立新分身，或仅重连指定的原分身。需要在运行 WinForms 消息循环的宿主线程调用。
+    /// 建立新子会话，或仅重连指定的原有子会话。需要在运行 WinForms 消息循环的宿主线程调用。
     /// 已连接时只核验，不发起重复连接；超时、取消及身份变更只断开本次发起的预览。
     /// </summary>
     /// <param name="expected">新建传空；重连须传入之前保存的子会话编号。</param>
@@ -302,7 +302,7 @@ public sealed class ChildSessionPreviewControl : AxHost
     /// <summary>
     /// 创建系统 RDP ActiveX 控件，并指定子会话音频输出策略。
     /// </summary>
-    /// <param name="audioMode">本连接的分身音频输出模式。</param>
+    /// <param name="audioMode">本连接的子会话音频输出模式。</param>
     public ChildSessionPreviewControl(ChildSessionAudioMode audioMode)
         : this(static () => new WindowsSessionInspector(), audioMode, ChildSessionPreviewSettings.Default)
     {
@@ -312,7 +312,7 @@ public sealed class ChildSessionPreviewControl : AxHost
     /// 创建系统 RDP ActiveX 控件并指定初始预览显示设置。
     /// </summary>
     /// <param name="settings">远端分辨率与本地显示方式。</param>
-    /// <param name="audioMode">本连接的分身音频输出策略。</param>
+    /// <param name="audioMode">本连接的子会话音频输出策略。</param>
     /// <exception cref="ArgumentNullException">设置对象为空时抛出。</exception>
     /// <exception cref="ArgumentOutOfRangeException">音频模式不受支持时抛出。</exception>
     public ChildSessionPreviewControl(
@@ -326,7 +326,7 @@ public sealed class ChildSessionPreviewControl : AxHost
     /// 创建系统 RDP ActiveX 控件，注入会话观察器工厂并指定音频输出策略。
     /// </summary>
     /// <param name="sessionInspectorFactory">创建会话观察器的工厂。</param>
-    /// <param name="audioMode">本连接的分身音频输出模式。</param>
+    /// <param name="audioMode">本连接的子会话音频输出模式。</param>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="sessionInspectorFactory"/> 为 null 时抛出。
     /// </exception>
@@ -345,7 +345,7 @@ public sealed class ChildSessionPreviewControl : AxHost
     /// </summary>
     /// <param name="sessionInspectorFactory">创建会话观察器的工厂。</param>
     /// <param name="settings">远端分辨率与本地显示方式。</param>
-    /// <param name="audioMode">本连接的分身音频输出策略。</param>
+    /// <param name="audioMode">本连接的子会话音频输出策略。</param>
     /// <exception cref="ArgumentNullException">观察器工厂或设置对象为空时抛出。</exception>
     /// <exception cref="ArgumentOutOfRangeException">音频模式不受支持时抛出。</exception>
     public ChildSessionPreviewControl(
@@ -360,7 +360,7 @@ public sealed class ChildSessionPreviewControl : AxHost
     /// 创建系统 RDP ActiveX 控件，注入会话观察器工厂并指定音频和显示设置。
     /// </summary>
     /// <param name="sessionInspectorFactory">创建会话观察器的工厂。</param>
-    /// <param name="audioMode">本连接的分身音频输出策略。</param>
+    /// <param name="audioMode">本连接的子会话音频输出策略。</param>
     /// <param name="settings">远端分辨率与本地显示方式。</param>
     /// <exception cref="ArgumentNullException">观察器工厂或设置对象为空时抛出。</exception>
     /// <exception cref="ArgumentOutOfRangeException">音频模式不受支持时抛出。</exception>
@@ -541,11 +541,11 @@ public sealed class ChildSessionPreviewControl : AxHost
     public void ConnectPreview(WindowsChildSessionCredentials? credentials = null) =>
         StartPreviewConnection(credentials, null);
 
-    /// <summary>异步重连已知分身。提交连接前复核编号，并在登录期间持续按该编号验证目标。</summary>
+    /// <summary>异步重连已知子会话。提交连接前复核编号，并在登录期间持续按该编号验证目标。</summary>
     public void ReconnectPreview(SessionId expected, WindowsChildSessionCredentials? credentials = null) =>
         StartPreviewConnection(credentials, expected);
 
-    /// <summary>将本次连接绑定到预期分身；普通新连接则在首次核验时绑定。凭据只在本次调用中使用。</summary>
+    /// <summary>将本次连接绑定到预期子会话；普通新连接则在首次核验时绑定。凭据只在本次调用中使用。</summary>
     private void StartPreviewConnection(WindowsChildSessionCredentials? credentials, SessionId? expected)
     {
         EnsureUiThread();
@@ -677,8 +677,8 @@ public sealed class ChildSessionPreviewControl : AxHost
         if (!childSession.IsDesktopReady)
         {
             throw new InvalidOperationException(childSession.IsLocked == true
-                ? $"分身 {childSession.Id} 已锁定，请在预览内解锁。"
-                : $"分身 {childSession.Id} 的解锁状态未知。");
+                ? $"子会话 {childSession.Id} 已锁定，请在预览内解锁。"
+                : $"子会话 {childSession.Id} 的解锁状态未知。");
         }
 
         _connectionTarget = childSession.Id;
@@ -772,7 +772,7 @@ public sealed class ChildSessionPreviewControl : AxHost
     /// 将 RDP 控件设置为只连接本机子会话，并请求固定的逻辑桌面分辨率。
     /// </summary>
     /// <param name="activeX">由 AxHost 创建的 RDP COM 控件。</param>
-    /// <param name="audioMode">本连接的分身音频输出模式。</param>
+    /// <param name="audioMode">本连接的子会话音频输出模式。</param>
     /// <param name="settings">本连接请求的远端尺寸与本地缩放模式。</param>
     private static void ConfigureChildSessionTarget(
         object activeX,
@@ -805,7 +805,7 @@ public sealed class ChildSessionPreviewControl : AxHost
 
         ConfigureDisplaySettings(activeX, settings);
 
-        // 除非调用方明确要求播放，否则不把后台分身声音转发到主桌面。
+        // 除非调用方明确要求播放，否则不把后台子会话声音转发到主桌面。
         ConfigureAudioMode(activeX, audioMode);
 
         // 写入 COM 属性后立即读回；不接受“设置调用没报错，但实际目标或尺寸未生效”的状态。
@@ -873,7 +873,7 @@ public sealed class ChildSessionPreviewControl : AxHost
         if (audioMode is not ChildSessionAudioMode.DoNotPlay
             and not ChildSessionAudioMode.RedirectToThisComputer)
         {
-            throw new ArgumentOutOfRangeException(nameof(audioMode), audioMode, "不支持指定的分身音频输出模式。");
+            throw new ArgumentOutOfRangeException(nameof(audioMode), audioMode, "不支持指定的子会话音频输出模式。");
         }
     }
 

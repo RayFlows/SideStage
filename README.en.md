@@ -27,7 +27,7 @@ SideStage is for scripts and apps that run directly on a physical PC and need to
 2. **Connect without typing your password each time.** You can save your Windows account password in Windows Credential Manager on this PC. In our initial tests, the child session could then sign in automatically while the main desktop kept its usual sign-in method.
 3. **Use familiar desktop features, including “Run as administrator.”** On some PCs, signing in with the main desktop's identity prevents apps in the child session from requesting elevation. Creating a new child session with your Windows account password can restore the usual UAC prompt.
 4. **Recover script input after disconnecting from your PC remotely.** Sometimes the programs in the child session keep running, but clicks and keystrokes stop working. If the main session is still running, SideStage can try to reconnect it to the local console. This experimental feature requires administrator access and can make the main desktop visible on the PC's screen.
-5. **Keep startup apps from opening a second time.** Under “Start when signing in to the child session” (分身登录时启动), choose which startup entries to skip, individually or in bulk. The main desktop keeps its usual startup settings. Available in the `v0.2.0` series.
+5. **Keep startup apps from opening a second time.** Under “Start when signing in to the child session” (子会话登录时启动), choose which startup entries to skip, individually or in bulk. The main desktop keeps its usual startup settings. Available in the `v0.2.0` series.
 6. **Disconnect or update while a task keeps running.** Choose “Disconnect” to leave the child session and its programs running. Reconnect later to check progress. When you're ready to end the programs, choose “Sign out of child session.”
 7. **Fit the session on your desktop while keeping the resolution your script needs.** For example, keep the session at `1920 × 1080` and scale its display to fit a smaller window with the same aspect ratio. You can also mute the child session independently of the main desktop.
 8. **Give AI computer-use tools their own mouse and browser.** Run tools such as Codex and the browser they control inside SideStage so you can keep using your own desktop.
@@ -60,7 +60,7 @@ Once all the checks pass, you should be able to connect.
 1. Windows may show a UAC prompt the first time you enable child sessions. SideStage enables the Windows setting for you.
 2. Microsoft's documentation lists the Pro, Education, and Pro for Workstations editions for hosting RDP connections. In our testing, Windows Home can also attempt a connection and should work in most cases. Try connecting to see whether it works on your PC.
 3. SideStage separates desktop windows and input. Programs keep your account permissions and run directly on your PC, outside a virtual machine. **Never use the child session as a sandbox for untrusted software.**
-4. Changing the resolution requires reconnecting. Toggling Mute child session (静音分身) also reconnects, and programs in the session keep running.
+4. Changing the resolution requires reconnecting. Toggling Mute child session (静音子会话) also reconnects, and programs in the session keep running.
 
 ## Q&A
 

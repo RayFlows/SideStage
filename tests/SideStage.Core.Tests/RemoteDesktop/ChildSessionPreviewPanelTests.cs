@@ -17,7 +17,7 @@ using SideStage.Windows.RemoteDesktop;
 namespace SideStage.Core.Tests.RemoteDesktop;
 
 /// <summary>
-/// 覆盖桌面分身预览面板的构造期布局和完成初始化后的尺寸布局。
+/// 覆盖子会话预览面板的构造期布局和完成初始化后的尺寸布局。
 /// </summary>
 [TestClass]
 public sealed class ChildSessionPreviewPanelTests

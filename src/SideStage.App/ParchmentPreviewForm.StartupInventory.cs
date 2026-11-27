@@ -54,7 +54,7 @@ internal sealed partial class ParchmentPreviewForm
         };
         content.Controls.Add(automatic);
         content.Controls.Add(CreateStartupItemsHeading());
-        content.Controls.Add(SettingsCaption.Footnote("关闭开关后，下次分身登录时会跳过该入口。应用自身是否允许重复启动未知。", _labelFont));
+        content.Controls.Add(SettingsCaption.Footnote("关闭开关后，下次登录子会话时会跳过该入口。应用自身是否允许重复启动未知。", _labelFont));
         var bulk = new SettingsList();
         _openAllStartup = new SettingsActionRow("全部打开", _bodyFont, async (_, _) => await SetAllStartupAsync(true));
         _closeAllStartup = new SettingsActionRow("全部关闭", _bodyFont, async (_, _) => await SetAllStartupAsync(false));
@@ -66,7 +66,7 @@ internal sealed partial class ParchmentPreviewForm
         content.ResumeLayout(true);
         _overview!.Visible = false;
         _drawerPages!.Controls.Add(_startupPage);
-        _drawerTitle!.Text = "分身启动项";
+        _drawerTitle!.Text = "子会话启动项";
         _drawerBack!.Visible = true;
         _drawerBack.Focus();
         RenderStartupItems();
@@ -82,7 +82,7 @@ internal sealed partial class ParchmentPreviewForm
         heading.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         DrawerMetrics.Margin(heading, 0, SectionGap, 0, 0);
-        heading.Controls.Add(SectionHeading("分身登录时启动", compact: true), 0, 0);
+        heading.Controls.Add(SectionHeading("子会话登录时启动", compact: true), 0, 0);
         _startupPrivilegeWarning = PaperInfoButton.PrivilegeWarning(_drawerArrowFont, _labelFont, "启动项权限提示",
             "需要管理员权限才能调整的启动项开关已隐藏。请以管理员身份重新打开 SideStage，查看可调整的启动项。");
         _startupPrivilegeWarning.Visible = _administrator == false;
@@ -156,7 +156,7 @@ internal sealed partial class ParchmentPreviewForm
         var batch = new StartupRuleBatch(_startupSnapshot.Items, allowed);
         if (batch.Candidates.Length == 0) return;
         string title = allowed ? "全部打开" : "全部关闭";
-        string action = allowed ? "撤销分身跳过规则，沿用 Windows 的启动设置" : "在下次分身登录时跳过";
+        string action = allowed ? "撤销子会话的跳过规则，沿用 Windows 的启动设置" : "在下次登录子会话时跳过";
         if (MessageBox.Show(this, $"将对 {batch.Candidates.Length} 项{action}。其余 {batch.Skipped} 项跳过。\n\n继续吗？",
             title, MessageBoxButtons.OKCancel, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.OK) return;
         _changingStartupItems = true;
@@ -282,7 +282,7 @@ internal sealed partial class ParchmentPreviewForm
             if (current.ReadOnlyReason != null) RenderStartupItems();
             _startupScanNotice = null;
             UpdateStartupScanStatus();
-            AppendLog($"{current.Name}：{(current.Blocked ? "下次分身登录时跳过" : "已恢复原启动项")}。");
+            AppendLog($"{current.Name}：{(current.Blocked ? "下次登录子会话时跳过" : "已恢复原启动项")}。");
         }
         catch (Exception error) when (StartupRuleBatch.Recoverable(error))
         {

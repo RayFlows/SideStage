@@ -170,7 +170,7 @@ internal static class SettingsInteractionCheck
         window.UpdateSessionCommands(false, true);
         var sessionHeading = Descendants(drawer).OfType<Label>().Single(label => label.Text == "当前会话");
         var pictureHeading = Descendants(drawer).OfType<Label>().Single(label => label.Text == "画面与声音");
-        Require(!sessionHeading.Visible && !logoff.Visible, "窗口未连接但分身仍可注销时隐藏当前会话");
+        Require(!sessionHeading.Visible && !logoff.Visible, "窗口未连接但子会话仍可注销时隐藏当前会话");
         window.UpdateSessionCommands(false, false);
         Require(paper.Controls[0].Right <= drawer.Left, "侧栏打开时首页状态完整可见");
         string longMessage = string.Concat(Enumerable.Repeat("请核对当前会话状态。", 12));

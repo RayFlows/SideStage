@@ -23,7 +23,7 @@ namespace SideStage.Core.Tests.Processes;
 public sealed class WindowsChildSessionProcessLauncherTests
 {
     /// <summary>
-    /// 覆盖 RDP 重连后连接状态已活动、分身仍在解锁界面的情况。
+    /// 覆盖 RDP 重连后连接状态已活动、子会话仍在解锁界面的情况。
     /// 不能确认解锁标志时也必须在投递代理之前拒绝请求。
     /// </summary>
     /// <param name="locked">系统报告已锁定，或无法读取明确标志。</param>

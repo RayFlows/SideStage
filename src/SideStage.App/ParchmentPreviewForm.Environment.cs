@@ -77,7 +77,7 @@ internal sealed partial class ParchmentPreviewForm
         {
             true => (CheckResult.Ok, "管理员", "SideStage 正以管理员身份运行。会话恢复仍需本机控制台空闲。"),
             false => (CheckResult.Warn, "普通权限 · 主桌面恢复已停用",
-                "可正常连接分身。如需启用主桌面恢复，请以管理员身份运行。"),
+                "可正常连接子会话。如需启用主桌面恢复，请以管理员身份运行。"),
             null => (CheckResult.Warn, "权限未知", "无法确认本次运行的管理员权限，主桌面恢复已停用。"),
         };
         SetEnvironmentCheck(_privilegeIcon, _privilegeText, level, status, detail);

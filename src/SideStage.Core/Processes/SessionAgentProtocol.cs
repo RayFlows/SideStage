@@ -140,7 +140,7 @@ internal static class SessionAgentProtocol
         const int maximumPngBytes = 256 * 1024 * 1024;
         if (length is < 24 or > maximumPngBytes)
         {
-            throw new InvalidDataException("分身返回的 PNG 长度无效。");
+            throw new InvalidDataException("子会话返回的 PNG 长度无效。");
         }
 
         byte[] image = new byte[length];
@@ -148,13 +148,13 @@ internal static class SessionAgentProtocol
         ReadOnlySpan<byte> signature = [137, 80, 78, 71, 13, 10, 26, 10];
         if (!image.AsSpan(0, signature.Length).SequenceEqual(signature))
         {
-            throw new InvalidDataException("分身未返回 PNG 图像。");
+            throw new InvalidDataException("子会话未返回 PNG 图像。");
         }
 
         // PNG 的 IHDR 紧跟 8 字节签名；读回尺寸可防止过期或其他桌面画面混入当前请求。
         if (!image.AsSpan(12, 4).SequenceEqual("IHDR"u8))
         {
-            throw new InvalidDataException("分身 PNG 缺少有效的 IHDR 图像头。");
+            throw new InvalidDataException("子会话 PNG 缺少有效的 IHDR 图像头。");
         }
 
         uint actualWidth = BinaryPrimitives.ReadUInt32BigEndian(image.AsSpan(16, 4));
@@ -162,7 +162,7 @@ internal static class SessionAgentProtocol
         if (actualWidth != expectedWidth || actualHeight != expectedHeight)
         {
             throw new InvalidDataException(
-                $"分身 PNG 尺寸为 {actualWidth}×{actualHeight}，预期 {expectedWidth}×{expectedHeight}。");
+                $"子会话 PNG 尺寸为 {actualWidth}×{actualHeight}，预期 {expectedWidth}×{expectedHeight}。");
         }
 
         return image;
@@ -181,7 +181,7 @@ internal static class SessionAgentProtocol
 /// <param name="Capture">是否只请求代理捕获当前桌面而不启动目标进程。</param>
 /// <param name="CaptureWidth">截图操作预期的桌面像素宽度。</param>
 /// <param name="CaptureHeight">截图操作预期的桌面像素高度。</param>
-/// <param name="ProbeInput">仅在目标分身测试零位移鼠标输入，不启动程序。</param>
+/// <param name="ProbeInput">仅在目标子会话测试零位移鼠标输入，不启动程序。</param>
 internal sealed record SessionAgentLaunchRequest(
     int ProtocolVersion,
     string AuthenticationToken,

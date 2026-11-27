@@ -156,19 +156,19 @@ internal static class Program
         return passed ? 0 : 1;
     }
 
-    /// <summary>向验收窗口提供尚未启用分身的首次使用状态，只在内存中处理启用请求。</summary>
+    /// <summary>向验收窗口提供尚未启用子会话的首次使用状态，只在内存中处理启用请求。</summary>
     internal sealed class FirstUseSessions : ISessionInspector
     {
         private bool _enabled;
 
-        /// <summary>允许验收用例改变下一轮系统查询的结果，包括已有分身、没有分身和查询失败。</summary>
+        /// <summary>允许验收用例改变下一轮系统查询的结果，包括已有子会话、没有子会话和查询失败。</summary>
         internal Func<SessionSnapshot?> ReadChild { get; set; } = () => null;
 
         /// <summary>返回固定的已登录主桌面，保证截图和断言不受本机活动会话影响。</summary>
         public SessionSnapshot GetCurrentSession() =>
             new(new SessionId(1), SessionConnectionState.Active, false, DateTimeOffset.UtcNow) { IsLocked = false };
 
-        /// <summary>向正式轮询提供当前用例指定的分身观测值。</summary>
+        /// <summary>向正式轮询提供当前用例指定的子会话观测值。</summary>
         public SessionSnapshot? TryGetChildSession() => ReadChild();
 
         /// <summary>提供用于首页回读的当前开关。</summary>

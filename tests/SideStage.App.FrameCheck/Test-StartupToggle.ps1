@@ -33,7 +33,7 @@ try {
         $process = Start-Process @options
         if ($process.ExitCode -ne 0) {
             Get-ChildItem -LiteralPath $trial -Filter 'preview-*.log' | Sort-Object LastWriteTime | Select-Object -Last 1 |
-                Get-Content -Encoding utf8 | Select-String '无法修改|恢复原启动项|下次分身登录'
+                Get-Content -Encoding utf8 | Select-String '无法修改|恢复原启动项|下次登录子会话'
             throw "启动项点击验收失败，管理员=$elevated，退出码=$($process.ExitCode)"
         }
         Write-Output "启动项关闭与恢复通过，管理员=$elevated。"

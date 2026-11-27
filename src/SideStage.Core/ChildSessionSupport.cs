@@ -1,7 +1,7 @@
 /*
  * 文件名称：ChildSessionSupport.cs
  * 文件职责：
- *   1. 暴露桌面分身库对 Windows 子会话能力的最小查询接口。
+ *   1. 暴露子会话库对 Windows 子会话能力的最小查询接口。
  *   2. 将 Windows 原生 API 的返回值转换为稳定、可诊断的 .NET 行为。
  *
  * 设计边界：
@@ -23,7 +23,7 @@ namespace SideStage.Core;
 /// 提供 Windows 子会话能力的只读查询。
 /// </summary>
 /// <remarks>
-/// 该类型是桌面分身库的基础能力探针，不代表系统中已经存在可连接的子会话。
+/// 该类型是子会话库的基础能力探针，不代表系统中已经存在可连接的子会话。
 /// 调用方仍必须在后续流程中独立验证会话编号、连接状态和目标进程归属。
 /// </remarks>
 public static class ChildSessionSupport

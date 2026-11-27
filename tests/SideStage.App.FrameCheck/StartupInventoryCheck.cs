@@ -92,7 +92,7 @@ internal static class StartupInventoryCheck
             back.PerformClick();
             Until(() => status.Lines.Count(line => line.Contains("启动项扫描完成")) == 2, window);
             foreach (var line in status.Lines.Where(line => line.Contains("启动项扫描完成"))) Console.WriteLine(line);
-            Action(window, "分身启动项").PerformClick();
+            Action(window, "子会话启动项").PerformClick();
             toggle = Descendants(window).OfType<CheckBox>().Single(x => x.Text == "启动时自动扫描");
             toggle.Checked = true;
             if (screenshot != null)
@@ -175,10 +175,10 @@ internal static class StartupInventoryCheck
         var preview = (ParchmentPreviewForm)window;
         var session = Descendants(window).OfType<Label>().Single(row => row.Text == "当前会话");
         preview.UpdateSessionCommands(false, true);
-        if (session.Visible) throw new InvalidOperationException("窗口未连接时，即使分身可注销也应隐藏当前会话。");
+        if (session.Visible) throw new InvalidOperationException("窗口未连接时，即使子会话可注销也应隐藏当前会话。");
         preview.SwitchMainView(RdpPreviewConnectionState.Connecting);
         var picture = Descendants(window).OfType<Label>().Single(row => row.Text == "画面与声音");
-        var login = Descendants(window).OfType<Label>().Single(row => row.Text == "分身登录");
+        var login = Descendants(window).OfType<Label>().Single(row => row.Text == "子会话登录");
         if (!session.Visible || session.PointToScreen(Point.Empty).Y >= picture.PointToScreen(Point.Empty).Y
             || login.Margin.Top <= login.Margin.Bottom)
             throw new InvalidOperationException("连接时当前会话应排在首位，组间留白应大于标题与选项的距离。");
@@ -186,10 +186,10 @@ internal static class StartupInventoryCheck
         if (session.Visible) throw new InvalidOperationException("断开连接后应立即收起当前会话。");
         preview.UpdateSessionCommands(false, false);
         if (session.Visible) throw new InvalidOperationException("没有可用操作时应收起当前会话。");
-        Action(window, "分身启动项").PerformClick();
+        Action(window, "子会话启动项").PerformClick();
         var scan = Action(window, "立即扫描");
         var auto = Descendants(window).OfType<CheckBox>().Single(row => row.Text == "启动时自动扫描");
-        var items = Descendants(window).OfType<Label>().Single(row => row.Text == "分身登录时启动");
+        var items = Descendants(window).OfType<Label>().Single(row => row.Text == "子会话登录时启动");
         var warning = Descendants(window).OfType<PaperInfoButton>().Single(button => button.AccessibleName == "启动项权限提示");
         bool elevated = StartupElevation.IsAdministrator();
         if (warning.Visible == elevated) throw new InvalidOperationException("首次进入启动项页的提示与实际权限不符。");
@@ -208,7 +208,7 @@ internal static class StartupInventoryCheck
         var closeAll = Action(window, "全部关闭");
         if (openAll.PointToScreen(Point.Empty).Y < items.PointToScreen(Point.Empty).Y ||
             closeAll.PointToScreen(Point.Empty).Y <= openAll.PointToScreen(Point.Empty).Y)
-            throw new InvalidOperationException("两个批量开关应位于分身登录设置的标题下方。");
+            throw new InvalidOperationException("两个批量开关应位于子会话登录设置的标题下方。");
         if (scan.PointToScreen(Point.Empty).Y >= auto.PointToScreen(Point.Empty).Y
             || auto.PointToScreen(Point.Empty).Y >= items.PointToScreen(Point.Empty).Y)
             throw new InvalidOperationException("扫描入口和自动开关应在启动项目列表之前。");

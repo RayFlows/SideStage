@@ -65,7 +65,7 @@ public sealed class ChildSessionPreviewControlTests
     }
 
     /// <summary>
-    /// 验证窗口化预览在发起连接前就已将 Windows 快捷键定向到分身。
+    /// 验证窗口化预览在发起连接前就已将 Windows 快捷键定向到子会话。
     /// 读取本机 ActiveX 的实际配置，覆盖默认仅在全屏时转发快捷键的回归。
     /// </summary>
     [STATestMethod]
@@ -90,7 +90,7 @@ public sealed class ChildSessionPreviewControlTests
     }
 
     /// <summary>
-    /// 验证调用方可显式选择把分身声音转发到本机，而不发起连接。
+    /// 验证调用方可显式选择把子会话声音转发到本机，而不发起连接。
     /// </summary>
     [STATestMethod]
     public void PreparePreview_WhenAudioRedirectIsRequested_UsesLocalPlaybackMode()

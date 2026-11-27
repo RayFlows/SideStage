@@ -1,7 +1,7 @@
 /*
  * 文件名称：ParchmentPreviewForm.cs
  * 文件职责：
- *   羊皮纸剪纸风格的桌面分身预览界面，承载 SideStage.App 的全部操作功能。
+ *   羊皮纸剪纸风格的子会话预览界面，承载 SideStage.App 的全部操作功能。
  *   未连接时显示环境检查；连接时由原生 RDP 面板占满铜框和标题栏以内的区域。
  *   功能完整性：与 ClassicPreviewForm 保持功能对等，不裁减任何会话操作。
  *
@@ -24,7 +24,7 @@ using SideStage.Windows.RemoteDesktop;
 
 namespace SideStage.App;
 
-/// <summary>羊皮纸剪纸风格的桌面分身预览窗口。</summary>
+/// <summary>羊皮纸剪纸风格的子会话预览窗口。</summary>
 internal sealed partial class ParchmentPreviewForm : Form
 {
     private static readonly Color CardLight   = Color.FromArgb(244, 238, 224);
@@ -439,7 +439,7 @@ internal sealed partial class ParchmentPreviewForm : Form
         p.AddRow(_preserveAspectRatioToggle);
 
         // 音频
-        _muteAudioToggle = new SettingsSwitch("静音分身", _bodyFont) { Checked = true };
+        _muteAudioToggle = new SettingsSwitch("静音子会话", _bodyFont) { Checked = true };
         p.AddRow(_muteAudioToggle);
 
         // 注册变更事件
@@ -527,11 +527,11 @@ internal sealed partial class ParchmentPreviewForm : Form
         options.Controls.Add(BuildCompactSettingsPanel());
         options.Controls.Add(SettingsCaption.Footnote(
             "连接中切换静音会自动重连。缩放和宽高比即时生效，更改分辨率需先断开。", _labelFont));
-        options.Controls.Add(SectionHeading("分身登录"));
+        options.Controls.Add(SectionHeading("子会话登录"));
         SettingsList account = new();
         _credentialsRow = new SettingsActionRow("登录凭据", _bodyFont, ManageCredentials, disclosure: true);
         account.AddRow(_credentialsRow);
-        _startupInventoryRow = new SettingsActionRow("分身启动项", _bodyFont, OpenStartupInventory, disclosure: true);
+        _startupInventoryRow = new SettingsActionRow("子会话启动项", _bodyFont, OpenStartupInventory, disclosure: true);
         account.AddRow(_startupInventoryRow);
         options.Controls.Add(account);
         AddRecoverySettings(options);
@@ -786,12 +786,12 @@ internal sealed partial class ParchmentPreviewForm : Form
         {
             _muteAudioToggle.Enabled = false;
             _audioReconnect.Change(_previewPanel.PreviewControl, mode);
-            AppendLog(_audioReconnect.Active ? "正在切换分身声音，等待旧连接断开。" :
-                _muteAudioToggle.Checked ? "分身声音已设为关闭。" : "分身声音已设为转发到本机。");
+            AppendLog(_audioReconnect.Active ? "正在切换子会话声音，等待旧连接断开。" :
+                _muteAudioToggle.Checked ? "子会话声音已设为关闭。" : "子会话声音已设为转发到本机。");
         }
         catch (Exception ex) when (IsDisplayable(ex))
         {
-            ShowError("无法更改分身声音设置", ex);
+            ShowError("无法更改子会话声音设置", ex);
         }
         RefreshSessionStatus();
     }
@@ -1094,9 +1094,9 @@ internal sealed partial class ParchmentPreviewForm : Form
             RdpPreviewConnectionState.Connected when verifiedTarget is { } target
                 => $"已连接 · 会话 {target.Value}",
             RdpPreviewConnectionState.Connected when _previewPanel.IsPresentingChildSignIn && _childNeedsUnlock
-                => "等待分身解锁",
+                => "等待子会话解锁",
             RdpPreviewConnectionState.Connected when _previewPanel.IsPresentingChildSignIn
-                => "等待分身登录",
+                => "等待子会话登录",
             RdpPreviewConnectionState.Connected
                 => "正在核验",
             RdpPreviewConnectionState.Connecting

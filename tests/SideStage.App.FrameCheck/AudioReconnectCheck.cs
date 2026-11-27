@@ -1,5 +1,5 @@
 /*
- * 文件职责：通过 SideStage 的真实设置开关复现快速连点和音频重连，检查最终登录的分身编号。
+ * 文件职责：通过 SideStage 的真实设置开关复现快速连点和音频重连，检查最终登录的子会话编号。
  * 测试边界：仅使用本机已保存的凭据，退出时断开测试连接并保留子会话。
  */
 using System.Runtime.InteropServices;
@@ -14,7 +14,7 @@ internal static class AudioReconnectCheck
     {
         Control[] controls = Descendants(window).ToArray();
         var preview = controls.OfType<ChildSessionPreviewPanel>().Single().PreviewControl;
-        var mute = controls.OfType<CheckBox>().Single(c => c.Text == "静音分身");
+        var mute = controls.OfType<CheckBox>().Single(c => c.Text == "静音子会话");
         var connect = controls.OfType<Button>().Single(b => b.Text == "连接");
         bool Ready() => preview.LoginCompleted && preview.Enabled &&
             preview.GetConnectionState() == RdpPreviewConnectionState.Connected;
@@ -33,7 +33,7 @@ internal static class AudioReconnectCheck
                 Wait(() => mute.Enabled && Ready() && preview.VerifyConnectedChildSession().Id == target, 30000);
                 if (mute.Checked != muted || (preview.AudioMode == ChildSessionAudioMode.DoNotPlay) != muted)
                     throw new InvalidOperationException("切换后的声音模式与请求不符。");
-                Console.WriteLine($"已恢复原分身 {target}，静音={muted}。");
+                Console.WriteLine($"已恢复原有子会话 {target}，静音={muted}。");
             }
             OpenSettings(window, mute);
             mute.Checked = false;

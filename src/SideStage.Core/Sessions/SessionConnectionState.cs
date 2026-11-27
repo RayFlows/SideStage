@@ -1,7 +1,7 @@
 /*
  * 文件名称：SessionConnectionState.cs
  * 文件职责：
- *   定义桌面分身库对 Windows 会话连接状态的稳定抽象。
+ *   定义子会话库对 Windows 会话连接状态的稳定抽象。
  *
  * 设计边界：
  *   - 枚举值不直接暴露 Windows 原生枚举，避免上层绑定 P/Invoke 细节。

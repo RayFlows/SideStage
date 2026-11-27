@@ -1,5 +1,5 @@
 /*
- * 文件职责：读取 Windows 的 Run 和启动文件夹，按登记位置独立控制个人应用的分身登录行为。
+ * 文件职责：读取 Windows 的 Run 和启动文件夹，按登记位置独立控制个人应用的子会话登录行为。
  * 写入顺序：保存原始登记，准备稳定的登录入口，最后替换登记。恢复时先核对身份和内容。
  * 范围约束：全机登记、策略、一次性任务、系统目录及 Windows 已禁用项只读。
  */
@@ -150,7 +150,7 @@ internal sealed class StartupRegistrations
         { return null; }
     }
 
-    /// <summary>没有其他保护原因时，只有 Windows 已启用的登记才允许设置分身规则。</summary>
+    /// <summary>没有其他保护原因时，只有 Windows 已启用的登记才允许设置子会话规则。</summary>
     private static string? ApprovalReason(bool? enabled) => enabled switch
     {
         true => null, false => "登录入口已由 Windows 禁用", null => "无法确认登录入口状态"

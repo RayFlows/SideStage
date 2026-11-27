@@ -133,7 +133,7 @@ internal static class Program
                         pipe,
                         request,
                         request.Capture ? "CaptureDesktop" : "StartTargetProcess",
-                        request.Capture ? $"分身取图失败（{ex.TargetSite?.Name}）。{ex.Message}" : "会话内启动代理无法创建或核验目标进程。",
+                        request.Capture ? $"子会话取图失败（{ex.TargetSite?.Name}）。{ex.Message}" : "会话内启动代理无法创建或核验目标进程。",
                         ex is Win32Exception win32Exception ? win32Exception.NativeErrorCode : ex.HResult,
                         handshakeTimeout.Token)
                     .ConfigureAwait(false);
@@ -295,12 +295,12 @@ internal static class Program
         if (bounds.Width != expectedWidth || bounds.Height != expectedHeight)
         {
             throw new InvalidOperationException(
-                $"当前子桌面是 {bounds.Width}×{bounds.Height}，预期为 {expectedWidth}×{expectedHeight}。");
+                $"子会话的桌面尺寸为 {bounds.Width}×{bounds.Height}，预期为 {expectedWidth}×{expectedHeight}。");
         }
 
         if (bounds.Width <= 0 || bounds.Height <= 0)
         {
-            throw new InvalidOperationException("当前子桌面没有有效的可捕获区域。");
+            throw new InvalidOperationException("子会话的桌面没有可捕获的区域。");
         }
 
         using Bitmap bitmap = new(bounds.Width, bounds.Height, PixelFormat.Format24bppRgb);

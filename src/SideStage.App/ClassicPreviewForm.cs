@@ -1,7 +1,7 @@
 /*
  * 文件名称：ClassicPreviewForm.cs
  * 文件职责：
- *   提供桌面分身库的人工验收界面，展示当前会话、子会话和预览连接状态。
+ *   提供子会话库的人工验收界面，展示当前会话、子会话和预览连接状态。
  *
  * 操作安全边界：
  *   - 启动和定时刷新只读取状态。
@@ -24,7 +24,7 @@ using SideStage.Windows.RemoteDesktop;
 namespace SideStage.App;
 
 /// <summary>
-/// 桌面分身预览的人工验收窗口。
+/// 子会话预览的人工验收窗口。
 /// </summary>
 internal sealed class ClassicPreviewForm : Form
 {
@@ -242,7 +242,7 @@ internal sealed class ClassicPreviewForm : Form
         ConfigureButton(_logoffButton, "注销子会话", LogoffChildSession, SurfaceColor, ErrorColor);
         _muteChildAudioToggle.AutoSize = false;
         _muteChildAudioToggle.Size = new Size(110, 36);
-        _muteChildAudioToggle.Text = "静音分身";
+        _muteChildAudioToggle.Text = "静音子会话";
         _muteChildAudioToggle.Checked = true;
         _muteChildAudioToggle.FlatStyle = FlatStyle.Flat;
         _muteChildAudioToggle.BackColor = WindowColor;
@@ -253,7 +253,7 @@ internal sealed class ClassicPreviewForm : Form
         _muteChildAudioToggle.CheckedChanged += ChangeChildAudioMode;
         _audioModeToolTip.SetToolTip(
             _muteChildAudioToggle,
-            "勾选时不播放分身声音；取消勾选会将声音转发到本机。连接中也可切换，会短暂重连预览但不会注销分身；若凭据未保存，可能需要重新登录。");
+            "勾选时不播放子会话声音；取消勾选会将声音转发到本机。连接中也可切换，会短暂重连预览但不会注销子会话；若凭据未保存，可能需要重新登录。");
         _disconnectButton.Enabled = false;
         _logoffButton.Enabled = false;
 
@@ -266,7 +266,7 @@ internal sealed class ClassicPreviewForm : Form
     }
 
     /// <summary>
-    /// 应用工具栏中的分身静音选项；活动预览会自动断开并重新连接以应用新模式。
+    /// 应用工具栏中的子会话静音选项；活动预览会自动断开并重新连接以应用新模式。
     /// </summary>
     /// <param name="sender">静音复选框。</param>
     /// <param name="eventArgs">复选框状态变化参数。</param>
@@ -282,10 +282,10 @@ internal sealed class ClassicPreviewForm : Form
             _audioReconnect.Change(_previewPanel.PreviewControl, audioMode);
 
             string modeMessage = _muteChildAudioToggle.Checked
-                ? "分身声音已设为关闭"
-                : "分身声音已设为转发到本机";
+                ? "子会话声音已设为关闭"
+                : "子会话声音已设为转发到本机";
             AppendLog(_audioReconnect.Active
-                ? $"{modeMessage}；正在重新连接预览，分身会话不会注销。"
+                ? $"{modeMessage}；正在重新连接预览，子会话不会注销。"
                 : $"{modeMessage}；将在下次连接预览时生效。");
             RefreshSessionStatus();
         }
@@ -296,7 +296,7 @@ internal sealed class ClassicPreviewForm : Form
             _muteChildAudioToggle.Checked =
                 _previewPanel.PreviewControl.AudioMode == ChildSessionAudioMode.DoNotPlay;
             _muteChildAudioToggle.CheckedChanged += ChangeChildAudioMode;
-            ShowOperationError("无法更改分身声音设置", exception);
+            ShowOperationError("无法更改子会话声音设置", exception);
         }
     }
 
@@ -1064,7 +1064,7 @@ internal sealed class ClassicPreviewForm : Form
             if (verificationMessage is not null)
             {
                 AppendTransientStatus(_previewPanel.IsPresentingChildSignIn
-                    ? (_childNeedsUnlock ? "请在预览内解锁分身。" : "已确认分身编号，等待 Windows 登录。登录提示可在预览内操作。")
+                    ? (_childNeedsUnlock ? "请在预览内解锁子会话。" : "已确认子会话编号，等待 Windows 登录。登录提示可在预览内操作。")
                     : verificationMessage);
             }
             UpdateSessionSummary(
@@ -1154,8 +1154,8 @@ internal sealed class ClassicPreviewForm : Form
         _statusLabel.Text = previewState switch
         {
             RdpPreviewConnectionState.Connected when verifiedChildSession => "已连接",
-            RdpPreviewConnectionState.Connected when _previewPanel.IsPresentingChildSignIn && _childNeedsUnlock => "等待分身解锁",
-            RdpPreviewConnectionState.Connected when _previewPanel.IsPresentingChildSignIn => "等待分身登录",
+            RdpPreviewConnectionState.Connected when _previewPanel.IsPresentingChildSignIn && _childNeedsUnlock => "等待子会话解锁",
+            RdpPreviewConnectionState.Connected when _previewPanel.IsPresentingChildSignIn => "等待子会话登录",
             RdpPreviewConnectionState.Connected => "正在核验",
             RdpPreviewConnectionState.Connecting => "正在连接",
             _ => "未连接",
@@ -1181,8 +1181,8 @@ internal sealed class ClassicPreviewForm : Form
         return previewState switch
         {
             RdpPreviewConnectionState.Connected when verifiedChildSession => "已连接",
-            RdpPreviewConnectionState.Connected when _previewPanel.IsPresentingChildSignIn && _childNeedsUnlock => "等待分身解锁",
-            RdpPreviewConnectionState.Connected when _previewPanel.IsPresentingChildSignIn => "等待分身登录",
+            RdpPreviewConnectionState.Connected when _previewPanel.IsPresentingChildSignIn && _childNeedsUnlock => "等待子会话解锁",
+            RdpPreviewConnectionState.Connected when _previewPanel.IsPresentingChildSignIn => "等待子会话登录",
             RdpPreviewConnectionState.Connected => "待核验",
             RdpPreviewConnectionState.Connecting => "连接中",
             _ => "未连接",

@@ -1,6 +1,6 @@
 /*
  * 文件名称：DesktopInputProbe.cs
- * 文件职责：在已核验编号的分身代理内测试 Windows 能否接收模拟输入。
+ * 文件职责：在已核验编号的子会话代理内测试 Windows 能否接收模拟输入。
  * 输入边界：只对普通交互桌面发送一次相对位移为零的鼠标移动。没有点击、按键或焦点切换。
  */
 using System.Runtime.InteropServices;

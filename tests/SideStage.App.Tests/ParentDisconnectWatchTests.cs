@@ -17,7 +17,7 @@ public sealed class ParentDisconnectWatchTests
         DateTimeOffset.UtcNow) { IsLocked = false };
     private static readonly SessionId Child = new(2);
 
-    /// <summary>只响应已绑定分身的本轮断开；重复消息和延迟采样都不能让同一轮再次恢复。</summary>
+    /// <summary>只响应已绑定子会话的本轮断开；重复消息和延迟采样都不能让同一轮再次恢复。</summary>
     [TestMethod]
     public void OneAttemptPerRemoteDisconnect()
     {

@@ -13,7 +13,7 @@ using Microsoft.Win32;
 
 namespace SideStage.App;
 
-/// <summary>管理桌面宿主的窗口偏好，不依赖 RDP 连接或分身状态。</summary>
+/// <summary>管理桌面宿主的窗口偏好，不依赖 RDP 连接或子会话状态。</summary>
 internal static class WindowSizeMemory
 {
     /// <summary>登记一次加载和关闭事件。仅在真正关闭时写入，取消关闭可继续调整窗口。</summary>

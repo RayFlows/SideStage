@@ -51,7 +51,7 @@ public sealed class WindowsChildSessionTerminator : IChildSessionTerminator
 
         if (childSnapshot.StateQueryError is int error)
         {
-            throw new InvalidOperationException($"无法确认分身 {childSnapshot.Id} 的状态（Win32 {error}），已取消注销。");
+            throw new InvalidOperationException($"无法确认子会话 {childSnapshot.Id} 的状态（Win32 {error}），已取消注销。");
         }
         if (confirmedChild.HasValue && confirmedChild.Value != childSnapshot.Id)
             throw new InvalidOperationException("确认期间子会话编号已变化，请重新确认。");

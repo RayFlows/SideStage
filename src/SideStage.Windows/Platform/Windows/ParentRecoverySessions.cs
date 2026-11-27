@@ -1,6 +1,6 @@
 /*
  * 文件名称：ParentRecoverySessions.cs
- * 文件职责：给一次父桌面恢复提供同账户、原分身和物理控制台的核验，以及一次 Windows 桌面切换。
+ * 文件职责：给一次父桌面恢复提供同账户、原有子会话和物理控制台的核验，以及一次 Windows 桌面切换。
  * 安全边界：只接受本进程的会话作为源，目标必须是已取样的空控制台编号。读取失败即停止。
  * 权限约定：使用进程现有权限，由 Windows 决定能否查询和接回，不保存密码或请求后台提权。
  */
@@ -17,13 +17,13 @@ internal sealed class ParentRecoverySessions(SessionId child)
 {
     private readonly WindowsSessionInspector _inspector = new();
 
-    /// <summary>从同一批 WTS 枚举取得账户与占用，再核对关联分身及物理控制台编号。</summary>
+    /// <summary>从同一批 WTS 枚举取得账户与占用，再核对关联子会话及物理控制台编号。</summary>
     internal uint RequireIdleConsole()
     {
         using var identity = WindowsIdentity.GetCurrent();
         SessionSnapshot parent = _inspector.GetCurrentSession();
         if (parent.ConnectionState != SessionConnectionState.Disconnected || !OriginalChildReady())
-            throw new InvalidOperationException("父桌面未断开，或原来的分身已变化或锁定。");
+            throw new InvalidOperationException("父桌面未断开，或原来的子会话已变化或锁定。");
         uint console = SelectConsole(ReadSessions(), identity.Name, parent.Id.Value, child.Value, WTSGetActiveConsoleSessionId());
         // 枚举中的空用户名可能是权限不足；再按编号查询，只有成功且明确为空才视为无人占用。
         if (!WTSQuerySessionInformationW(0, console, 5, out var user, out uint bytes))
@@ -49,7 +49,7 @@ internal sealed class ParentRecoverySessions(SessionId child)
         Station? console = stations.SingleOrDefault(s => s.Id == physicalConsole);
         if (parent == 0 || childId == 0 || parent == childId || source is not { State: 4 } ||
             target is not { State: 0 } || !source.BelongsTo(account) || !target.BelongsTo(account))
-            throw new InvalidOperationException("未能确认父桌面和活动分身均属于当前账户。");
+            throw new InvalidOperationException("未能确认父桌面和活动子会话均属于当前账户。");
         if (physicalConsole is 0 or uint.MaxValue || console is not { State: 1 } || console.Id == childId ||
             !string.Equals(console.Name, "console", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrEmpty(console.User))
             throw new InvalidOperationException("本机控制台已有用户或状态未知。");
@@ -66,7 +66,7 @@ internal sealed class ParentRecoverySessions(SessionId child)
             throw LastWindowsError();
     }
 
-    /// <summary>复检输入前后都核对物理控制台已归还给当前进程，并且原来的分身仍可操作。</summary>
+    /// <summary>复检输入前后都核对物理控制台已归还给当前进程，并且原来的子会话仍可操作。</summary>
     internal bool IsRestored()
     {
         SessionSnapshot parent = _inspector.GetCurrentSession();
@@ -74,7 +74,7 @@ internal sealed class ParentRecoverySessions(SessionId child)
             && WTSGetActiveConsoleSessionId() == parent.Id.Value && OriginalChildReady();
     }
 
-    /// <summary>从本进程的父会话重新向 Windows 查询关联分身，排除刚注销或新建的目标。</summary>
+    /// <summary>从本进程的父会话重新向 Windows 查询关联子会话，排除刚注销或新建的目标。</summary>
     private bool OriginalChildReady() =>
         _inspector.TryGetChildSession() is { IsChildSession: true, IsDesktopReady: true } current && current.Id == child;
 

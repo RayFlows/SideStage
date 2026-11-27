@@ -47,7 +47,7 @@ internal sealed class StartupAppRow : CheckBox
         if (_editable) Click += (_, _) => clicked(this);
     }
 
-    /// <summary>逐行显示系统登记状态、操作限制和同一任务的重复触发策略。分身开关独立于 Windows 状态。</summary>
+    /// <summary>逐行显示系统登记状态、操作限制和同一任务的重复触发策略。子会话开关独立于 Windows 状态。</summary>
     private static string Describe(StartupEntry item)
     {
         string source = item.Source switch

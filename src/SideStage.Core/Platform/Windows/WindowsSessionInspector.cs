@@ -172,7 +172,7 @@ public sealed class WindowsSessionInspector : ISessionInspector
         SessionId sessionId, bool isChildSession, int errorCode,
         Func<SessionId, (SessionConnectionState State, int? Error)> readBasicState)
     {
-        // 分身切换期间编号可能仍在，但查询不到对应的会话；本机此时 WTSInfoEx 返回 1733。
+        // 子会话切换期间编号可能仍在，但查询不到对应的会话；本机此时 WTSInfoEx 返回 1733。
         if (!isChildSession || errorCode is not (2 or 5 or 1733 or 7022))
         {
             throw CreateWin32Exception(nameof(WTSQuerySessionInformationW), errorCode);

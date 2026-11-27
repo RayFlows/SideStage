@@ -1,12 +1,12 @@
 /*
  * 文件名称：Program.cs
  * 文件职责：
- *   启动桌面分身库的 Windows Forms 人工验收宿主。
+ *   启动子会话库的 Windows Forms 人工验收宿主。
  *
  * 运行约束：
  *   - 使用 STA 线程创建并运行 Windows RDP ActiveX 控件。
  *   - 不在启动时创建、连接、启用或注销任何会话。
- *   - 主窗口按用户的会话恢复偏好处理已连接分身的远程断开通知。
+ *   - 主窗口按用户的会话恢复偏好处理已连接子会话的远程断开通知。
  */
 
 using System.Security.Principal;

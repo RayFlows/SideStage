@@ -33,7 +33,7 @@ public sealed class ChildSessionPreviewPanel : Panel
     /// <summary>
     /// 创建一个使用默认 1920×1080、自适应缩放和锁定宽高比的预览面板。
     /// </summary>
-    /// <param name="audioMode">本连接的分身音频输出模式；默认不播放声音。</param>
+    /// <param name="audioMode">本连接的子会话音频输出模式；默认不播放声音。</param>
     public ChildSessionPreviewPanel(ChildSessionAudioMode audioMode = ChildSessionAudioMode.DoNotPlay)
         : this(ChildSessionPreviewSettings.Default, audioMode)
     {
@@ -43,7 +43,7 @@ public sealed class ChildSessionPreviewPanel : Panel
     /// 创建一个使用指定远端分辨率和本地显示方式的预览面板。
     /// </summary>
     /// <param name="settings">远端尺寸、缩放模式和比例锁定选项。</param>
-    /// <param name="audioMode">本连接的分身音频输出模式；默认不播放声音。</param>
+    /// <param name="audioMode">本连接的子会话音频输出模式；默认不播放声音。</param>
     public ChildSessionPreviewPanel(
         ChildSessionPreviewSettings settings,
         ChildSessionAudioMode audioMode = ChildSessionAudioMode.DoNotPlay)
@@ -181,7 +181,7 @@ public sealed class ChildSessionPreviewPanel : Panel
             RdpPreviewConnectionState.Disconnected when !childSessionsEnabled =>
                 ("Windows 子会话功能未启用", "启用子会话功能后才能连接预览"),
             RdpPreviewConnectionState.Disconnected when hasChildSession =>
-                ("分身预览未连接", "点击“连接预览”打开分身"),
+                ("子会话预览未连接", "点击“连接预览”打开子会话"),
             RdpPreviewConnectionState.Disconnected =>
                 ("子会话尚未建立", "点击“连接预览”发起本机子会话连接"),
             RdpPreviewConnectionState.Connected when !isVerifiedChildSession =>

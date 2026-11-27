@@ -165,8 +165,8 @@ public sealed class WindowsChildSessionProcessLauncher : IChildSessionProcessLau
         if (!childSession.IsDesktopReady)
         {
             throw new InvalidOperationException(childSession.IsLocked == true
-                ? $"分身 {targetSessionId} 已锁定，请在分身预览中完成 Windows 解锁。"
-                : $"无法确认分身 {targetSessionId} 已解锁。");
+                ? $"子会话 {targetSessionId} 已锁定，请在子会话预览中完成 Windows 解锁。"
+                : $"无法确认子会话 {targetSessionId} 已解锁。");
         }
     }
 
